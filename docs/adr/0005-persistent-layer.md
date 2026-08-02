@@ -20,12 +20,15 @@ Redis is ephemeral coordination only:
 
 ## Rationale
 - Checkpoint data needs to be durable, a persistent storage like Postgres is required so that the data is not lost due to crash which is a possibility for Redis as it stores data in memory
-Redis will be used for cache and locks which has a TTL and durable data and ephemeral data don't share a store.
+Redis will be used for cache and locks which has a TTL.
+The main principle here is - durable data and ephemeral data don't share a store.
 PGvector because, the data what we have is low, postgres is already getting used, minumim tools minimum headaches to manage them. For GDPR delete, lesser tool will be better as less place to find for delete
 
 
 ## Consequences
-All three now lives in PostGres, it is simpler to manage backup and security. But it is becoming a SPOF. So managing it is critical.Now deleting GDPR data will involve deleteing all the personal data of the user.
+All three categories — checkpoints, metadata, and vectors — now live in one Postgres. Backup and security are simpler with a single system, but that Postgres becomes a SPOF, so managing it is critical.
+Consolidation does not remove the GDPR problem, it relocates it: personal data still lands in three separate places inside Postgres, so erasure must reach all three. Every additional data home is one more place to find and delete PII from.
+
 
 ## Alternatives Considered
 We considered Postgres for permanent storage and kept redis for cache and locks. There was a choice of choosing redis for all but I discarded that seeing the nature of data and the durability.
