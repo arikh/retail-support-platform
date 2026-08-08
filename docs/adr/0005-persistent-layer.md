@@ -19,7 +19,7 @@ Redis is ephemeral coordination only:
 - Never the checkpointer; never a system of record
 
 ## Rationale
-- Checkpoint data needs to be durable, a persistent storage like Postgres is required so that the data is not lost due to crash which is a possibility for Redis as it stores data in memory
+Checkpoint data needs to be durable, a persistent storage like Postgres is required so that the data is not lost due to crash which is a possibility for Redis as it stores data in memory
 Redis will be used for cache and locks which has a TTL.
 The main principle here is - durable data and ephemeral data don't share a store.
 PGvector because, the data what we have is low, postgres is already getting used, minumim tools minimum headaches to manage them. For GDPR delete, lesser tool will be better as less place to find for delete
