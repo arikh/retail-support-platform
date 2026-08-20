@@ -5,21 +5,21 @@ Accepted
 
 ## Context
 On resume, an interrupted node re-runs from the top, not from
-the line after interrupt(). So anything above interrupt() executes more than
-once.
+the line after interrupt(). So anything above interrupt() executes more than once.
+This is because LangGraph re-executes the node from the beginning on resume — it does not continue from the line after interrupt().
 
 ## Decision
 In any node that calls `interrupt()`, no irreversible side effect runs before
 the `interrupt()` line. The interrupt goes first; irreversible work goes after.
 Idempotency keys at the provider boundary as a backstop.
-Rationale: The irreversible work always takes place after an human input received Previous work jus calculation so data changes, so starting from begining has no harm.
+Rationale: irreversible work always runs after human input is received. Everything before interrupt() is just calculation, so re-running from the top changes no external state and does no harm.
 
 ## Consequences
 This one rule protects two features:
-- Resume-safety: The pre interrupt work just preparing the data and calculation no data modification
-- Abandonment-safety: As there is no permannet change of data, it is safe to abandon
+- Resume-safety: pre-interrupt() work only prepares data and calculates — no data modification, so re-running is harmless.
+- Abandonment-safety: no permanent change happens before the gate, so an abandoned interrupt leaves no partial state behind.
 
-Negative / cost: A reversible pre-interrupt read is fine, but the discipline is on the developer, he needs to make sure every permanent changes to data takes place post interruption
+Negative / cost: the barrier is a convention, not a mechanical guarantee — nothing in the type system or runtime prevents a developer from placing an irreversible side effect before interrupt(). Idempotency at the provider boundary is the only automated backstop. Requires reviewer discipline.
 
 ## Related
 - ADR-007 (HITL — depends on this barrier)
