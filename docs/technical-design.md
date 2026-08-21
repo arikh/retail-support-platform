@@ -66,10 +66,10 @@ an ADR in `docs/adr/`.
    │                   ┌──────────────┐                            │
    │             ┌────▶│  supervisor  │  rules first,              │
    │             │     └──────┬───────┘  LLM on miss               │
-   │             │            │ writes next_worker                 │
+   │             │            │ writes next                        │
    │             │  ┌─────────┼──────────┬──────────┐              │
    │             │  ▼         ▼          ▼          ▼              │
-   │             │ support  analytics  escalation  human_gate      │
+   │             │ support  analysis   escalation  human_gate      │
    │             │  │         │          │          │              │
    │             └──┴─────────┴──────────┴──────────┘              │
    │                                                               │
@@ -87,7 +87,7 @@ an ADR in `docs/adr/`.
 | Worker | Responsibility |
 |---|---|
 | `support` | Order lookup, policy questions, RAG over the support corpus. This is the migrated capstone agent. |
-| `analytics` | Structured data questions — order history, spend patterns, trends |
+| `analysis` | Structured data questions — order history, spend patterns, trends |
 | `escalation` | Human handoff, refund preparation, complaint routing |
 
 Workers never call each other. All coordination goes through the supervisor.
@@ -106,7 +106,7 @@ must this fact live?**
 | Changes during run | Never | Constantly | Rarely |
 | Persisted | No | Yes, every step | Yes, separately |
 | Lifetime | One call | One conversation | Forever |
-| Examples | `tenant_id`, `customer_id`, auth roles, DB handle, model config | `messages`, `next_worker`, worker findings, `pending_approval` | Past resolutions, customer preferences |
+| Examples | `tenant_id`, `customer_id`, auth roles, DB handle, model config | `messages`, `next`, worker findings, `pending_approval` | Past resolutions, customer preferences |
 
 Rule of thumb: **Store holds facts about the customer. State holds facts about
 the conversation.**
@@ -128,21 +128,21 @@ the conversation.**
 ### Shape
 
 ```python
-class State(TypedDict):
+class SupportState(TypedDict):
     # conversation
     messages: Annotated[list, add_messages]
 
     # control plane — supervisor owns these
-    next_worker: str | None
+    next: str | None
     status: Literal["running", "awaiting_human", "done", "failed"]
     step_count: Annotated[int, operator.add]
     errors: Annotated[list[str], operator.add]
     pending_approval: ApprovalRequest | None
 
     # worker namespaces — one owner each
-    support: SupportFindings | None
-    analytics: AnalyticsFindings | None
-    escalation: EscalationFindings | None
+    support_findings: SupportFindings | None
+    analysis_findings: AnalysisFindings | None
+    escalation_findings: EscalationFindings | None
 ```
 
 Field names are provisional. **The four rules are not.**
@@ -175,7 +175,7 @@ decision = rules.match(state)          # cheap, deterministic, testable
 if decision is None:
     decision = llm.decide(state)       # flexible fallback
     log_fallback(state, decision)      # every miss is recorded
-return {"next_worker": decision}
+return {"next": decision}
 ```
 
 - The routing decision is always a **value**, never prose.
@@ -227,7 +227,7 @@ Accepted for now.
 | 2 | Persistence & Memory Architecture | Postgres checkpoints, Redis sessions. **Schema freezes here.** |
 | 3 | Supervisor Topology & Worker Wrapping | Routing, capstone agent migrated to `support` |
 | 4 | Checkpointing & Recovery | Crash recovery, resume, time travel |
-| 5 | Multi-Worker Orchestration | Parallel workers, `analytics` and `escalation` |
+| 5 | Multi-Worker Orchestration | Parallel workers, `analysis` and `escalation` |
 | 6 | Human-in-the-Loop | Approval gate, review surface |
 | 7 | Observability & Cost | Tracing, cost tracking, eval dashboard |
 | 8 | Production Hardening | Auth, RBAC, streaming, Docker |

@@ -29,9 +29,9 @@ class SupportFindings(BaseModel):
     confidence: float = Field(ge=0, le=1)
     refund_amount: int | None = None
 
-class State(TypedDict):
+class SupportState(TypedDict):
     messages: Annotated[list, add_messages]
-    support: SupportFindings | None
+    support_findings: SupportFindings | None
 ```
 
 ## Consequences

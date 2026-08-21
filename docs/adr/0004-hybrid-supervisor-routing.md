@@ -24,7 +24,7 @@ decision = rules.match(state)
 if decision is None:
     decision = llm.decide(state)
     log_fallback(state, decision)
-return {"next_worker": decision}
+return {"next": decision}
 ```
 
 The routing decision is always a value, never prose. Routing that depends on

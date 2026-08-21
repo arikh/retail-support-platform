@@ -4,7 +4,7 @@
 
 ## Context
 
-Three workers — `support`, `analytics`, `escalation` — each produce findings the
+Three workers — `support`, `analysis`, `escalation` — each produce findings the
 supervisor reads. Two ways to hold them in state:
 
 1. One shared `findings: Annotated[list, add]` that all workers append to.
