@@ -1,8 +1,8 @@
 # retail-support-platform — Technical Design Document
 
-**Status:** Draft · Blocks 1–3 decided, Blocks 4–5 open
+**Status:** Living document · Architecture phase closed (ADRs 001–008) · Module 2 (persistence) in progress
 **Owner:** Arikh Akher
-**Last updated:** 24 July 2026
+**Last updated:** 21 August 2026
 
 ---
 
@@ -78,7 +78,7 @@ an ADR in `docs/adr/`.
          ▼                    ▼                       ▼
    ┌───────────┐      ┌──────────────┐        ┌──────────────┐
    │  Postgres │      │    Redis     │        │  LangSmith / │
-   │checkpoints│      │session cache │        │   Langfuse   │
+   │checkpoints│      │locks + cache │        │   Langfuse   │
    └───────────┘      └──────────────┘        └──────────────┘
 ```
 
@@ -200,7 +200,7 @@ Accepted for now.
 | Orchestration | LangGraph (`StateGraph`, not prebuilts) |
 | API | FastAPI |
 | Checkpoints | PostgreSQL |
-| Session cache | Redis |
+| Locks + cache | Redis |
 | Models | Provider abstraction with fallback — `ModelProvider.get(role=...)` |
 | Observability | LangSmith / Langfuse, OpenTelemetry |
 | Packaging | Docker |
@@ -216,6 +216,10 @@ Accepted for now.
 | 002 | Per-worker state namespaces, not a shared findings list. Ownership over extensibility. |
 | 003 | TypedDict for graph state, Pydantic for worker findings. |
 | 004 | Hybrid routing — rules first, LLM fallback, fallbacks logged for review. |
+| 005 | Postgres as system of record; Redis ephemeral only (locks + cache). |
+| 006 | PII handling and right-to-erasure — tokenize at ingestion, vault mapping. |
+| 007 | Human-in-the-loop — pause as durable row; accept/reject/edit, expired on TTL. |
+| 008 | Irreversibility barrier — no side effect before interrupt(). |
 
 ---
 
@@ -224,7 +228,7 @@ Accepted for now.
 | # | Module | Delivers |
 |---|---|---|
 | 1 | State Contract & Service Boundaries | The state schema, worker interfaces |
-| 2 | Persistence & Memory Architecture | Postgres checkpoints, Redis sessions. **Schema freezes here.** |
+| 2 | Persistence & Memory Architecture | Postgres checkpoints, Redis locks + cache. **Schema freezes here.** |
 | 3 | Supervisor Topology & Worker Wrapping | Routing, capstone agent migrated to `support` |
 | 4 | Checkpointing & Recovery | Crash recovery, resume, time travel |
 | 5 | Multi-Worker Orchestration | Parallel workers, `analysis` and `escalation` |
@@ -237,19 +241,20 @@ Architectural Concepts → Code Blueprint → Testing Suite → Interactive Chal
 
 ---
 
-## 10. Open — to be decided
+## 10. Open questions
 
-**Block 4 — Persistence and checkpointing**
-- What exactly a checkpoint contains, and how resume reconstructs a run
-- Thread identity and how a conversation is addressed
-- Redis role: is it a cache, a lock, or session storage
-- Retention policy — checkpoints hold customer PII
+Resolved architecture questions now live in their ADRs, not here: Redis role
+(ADR-005), PII retention in checkpoints (ADR-006), pause and resume mechanics
+(ADR-007, ADR-008). What remains genuinely open, tagged to the module that
+closes it:
 
-**Block 5 — Human-in-the-loop and observability**
-- Where the graph pauses, and how the human decision re-enters
-- What the reviewer sees, and what that requires state to hold
+**Module 2 — persistence & memory**
+- What a checkpoint contains, and how resume reconstructs a run
+- Thread identity — how a conversation is addressed for checkpointing
+
+**Module 6 — human-in-the-loop**
+- The reviewer surface: what a human sees, and what state must hold for it
+  (the `pending_approval` object — decided at the schema freeze, Module 2)
+
+**Module 7 — observability & cost**
 - Trace granularity, cost attribution, evaluation harness design
-
-**Also outstanding**
-- Push repo to GitHub
-- Enrich ADR-001 from stub

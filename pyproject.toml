@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "retail-support-platform"
 version = "0.1.0"
-description = "Add your description here"
+description = "Production-grade multi-agent retail customer-support platform on LangGraph — supervisor + specialist workers, durable checkpointing, human-in-the-loop, PII-by-design."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

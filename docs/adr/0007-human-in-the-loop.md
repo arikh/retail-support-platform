@@ -17,8 +17,10 @@ blocked process. It reuses the crash-resume checkpoint mechanism (ADR-005)
 Rationale: its a record in database so if it is 1000 connections or tens of thousand, it just another record in the database and that's how it is easy to scale
 
 ### 2. Response taxonomy
-A reviewer can accept/reject/edit. Carried out of interrupt() via Command(resume=...) as a single structured payload.
-Rationale: The three because user can accept, reject or can propose a new value that's why edit
+A reviewer has three actions: accept / reject / edit. Carried out of interrupt() via Command(resume=...) as a single structured payload.
+Rationale: three because the user can accept, reject, or propose a new value (edit).
+
+The recorded outcome enum (EscalationFindings.status) has a fourth value: `expired` — TTL abandonment (see §4). It routes as reject (same verdict, one router — ADR-004) but is recorded distinctly, so audit can tell "nobody answered in time" from "a human rejected". Reviewer actions: three. Recorded outcomes: four — approved / rejected / edited / expired.
 
 ### 3. Reject routing
 On reject, control returns to the supervisor, expressed as state (a rejection flag + reason written into state), not as a new direct edge.
