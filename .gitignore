@@ -1,33 +1,20 @@
 # Python
 __pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
-build/
-dist/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
 
-# uv / venv
+# Virtual env
 .venv/
 
-# Environment
+# Environment / secrets
 .env
 .env.*
-
-# IDE
-.idea/
-.vscode/
 
 # OS
 .DS_Store
 
-# Data / local artifacts
-*.sqlite
-*.db
-chroma/
-*.log
-
-# Test / coverage
-.pytest_cache/
-.ruff_cache/
-htmlcov/
-.coverage
+# Editor
+.vscode/
+.idea/
