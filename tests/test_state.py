@@ -36,3 +36,20 @@ def test_findings_overwrite():
     result = app.invoke(initial)
 
     assert result["support_findings"].summary == "new"
+
+def test_messages_append_through_graph():
+    def emit_message(state: SupportState):
+        return {"messages": [HumanMessage(content="hi")]}
+
+    graph = StateGraph(SupportState)
+    graph.add_node("emit_message", emit_message)
+    graph.add_edge(START, "emit_message")
+    graph.add_edge("emit_message", END)
+    app = graph.compile()
+
+    initial = {
+        "messages": [AIMessage(content="hello")]
+    }
+    result = app.invoke(initial)
+
+    assert len(result["messages"]) == 2
