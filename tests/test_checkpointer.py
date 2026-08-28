@@ -92,7 +92,7 @@ async def test_concurrent_lost_update_without_lock():
 
     # build graph
     graph = StateGraph(SupportState)
-    graph.add_node("bump", node_a)
+    graph.add_node("bump", bump)
     graph.add_edge(START, "bump")
     graph.add_edge("bump", END)
 
@@ -110,3 +110,32 @@ async def test_concurrent_lost_update_without_lock():
         snapshot = await app.aget_state(config)
         print(snapshot.values["step_count"])
         assert snapshot.values["step_count"] == 2  # lost update — one concurrent +1 dropped. With Redis lock → 3.
+
+
+async def test_durable_resume_new_instance():
+    thread_id = str(uuid.uuid4())
+    config = {"configurable": {"thread_id": thread_id}}
+
+    # Build the graph
+    graph = StateGraph(SupportState)
+    graph.add_node("node_a", node_a)
+    graph.add_node("node_b", node_b)
+    graph.add_edge(START, "node_a")
+    graph.add_edge("node_a", "node_b")
+    graph.add_edge("node_b", END)
+
+    # Scope 1 hit interrupt and check next
+    async with get_checkpointer() as saver1:
+        app = graph.compile(checkpointer=saver1, interrupt_before=["node_b"])
+        await app.ainvoke({"step_count": 0, "messages": []}, config)
+        snapshot = await app.aget_state(config)
+        assert snapshot.values["step_count"] == 1
+        assert snapshot.next == ("node_b",)
+    
+    async with get_checkpointer() as saver2:
+        app = graph.compile(checkpointer=saver2)
+        await app.ainvoke(None, config)
+        snapshot = await app.aget_state(config)
+        assert snapshot.values["step_count"] == 2
+
+
