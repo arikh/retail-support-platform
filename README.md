@@ -29,10 +29,12 @@ the decision log is the point of this repo as much as the code.
 
 ## Status
 
-Architecture phase closed — ADRs 001–008 accepted. Module 1, the state
-contract (`src/retail_support/state.py`), is built and test-proven. Module 2
-(persistence & memory) is in progress; the state schema freezes once Postgres
-checkpointing lands.
+Architecture phase closed — ADRs 001–010 accepted. Module 1 (state contract,
+`src/retail_support/state.py`) and Module 2 (persistence) are built and
+test-proven: Postgres checkpointing via `AsyncPostgresSaver`, thread-metadata
+and PII-vault tables, checkpoint-schema isolation, and tests covering
+durability, resume-after-crash, and concurrent-writer behavior. The state
+schema is frozen (ADR-0009). Module 3 (supervisor + first worker) is next.
 
 There is no end-to-end runnable system yet, and that is deliberate (ADR-001):
 shape before code. The platform is built one module at a time.
@@ -43,12 +45,11 @@ Python 3.12 · LangGraph · Pydantic · PostgreSQL · Redis · FastAPI · `uv` �
 
 ## Layout
 
-```
-src/retail_support/        # state contract (Module 1); services land per module
-tests/                     # contract tests
-docs/adr/                  # architecture decision records — the design log
-docs/technical-design.md   # technical design document
-```
+    src/retail_support/        # state contract (Module 1); services land per module
+    sql/                       # user-owned table DDL (metadata, PII vault)
+    tests/                     # contract + persistence tests
+    docs/adr/                  # architecture decision records — the design log
+    docs/technical-design.md   # technical design document
 
 ## Decision log
 
@@ -56,11 +57,13 @@ The ADRs are the substance of this project. Start there:
 
 | ADR | Decision |
 |---|---|
-| 001 | Rebuild rather than refactor the capstone prototype |
-| 002 | Per-worker state namespaces, not a shared findings list |
-| 003 | TypedDict for graph state, Pydantic for worker findings |
-| 004 | Hybrid supervisor routing — rules first, LLM fallback |
-| 005 | Postgres as system of record, Redis for ephemeral coordination |
-| 006 | PII handling and right-to-erasure |
-| 007 | Human-in-the-loop control |
-| 008 | Irreversibility barrier (side-effect placement) |
+| 0001 | Rebuild rather than refactor the capstone prototype |
+| 0002 | Per-worker state namespaces, not a shared findings list |
+| 0003 | TypedDict for graph state, Pydantic for worker findings |
+| 0004 | Hybrid supervisor routing — rules first, LLM fallback |
+| 0005 | Postgres as system of record, Redis for ephemeral coordination |
+| 0006 | PII handling and right-to-erasure |
+| 0007 | Human-in-the-loop control |
+| 0008 | Irreversibility barrier (side-effect placement) |
+| 0009 | Control-plane fields frozen into the state schema |
+| 0010 | Concurrency safety — locking deferred to exactly-once operations |
