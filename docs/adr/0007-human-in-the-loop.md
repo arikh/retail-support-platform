@@ -1,4 +1,4 @@
-# ADR-007: Human-in-the-Loop Control
+# ADR-0007: Human-in-the-Loop Control
 
 ## Status
 Accepted

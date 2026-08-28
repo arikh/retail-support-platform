@@ -1,4 +1,4 @@
-# ADR-009: Control-plane fields frozen into the state schema
+# ADR-0009: Control-plane fields frozen into the state schema
 
 ## Status
 Accepted

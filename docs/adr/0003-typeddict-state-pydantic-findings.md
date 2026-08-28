@@ -1,4 +1,4 @@
-# ADR-003: TypedDict for graph state, Pydantic for worker findings
+# ADR-0003: TypedDict for graph state, Pydantic for worker findings
 
 **Status:** Accepted · 24 July 2026
 

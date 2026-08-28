@@ -1,4 +1,4 @@
-# ADR-006: PII Handling and Right-to-Erasure
+# ADR-0006: PII Handling and Right-to-Erasure
 
 ## Status
 Accepted

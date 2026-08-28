@@ -1,4 +1,4 @@
-# ADR-002: Per-worker state namespaces, not a shared findings list
+# ADR-0002: Per-worker state namespaces, not a shared findings list
 
 **Status:** Accepted · 24 July 2026
 

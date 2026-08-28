@@ -1,4 +1,4 @@
-# ADR-008: Irreversibility Barrier (Side-Effect Placement)
+# ADR-0008: Irreversibility Barrier (Side-Effect Placement)
 
 ## Status
 Accepted

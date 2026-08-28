@@ -1,4 +1,4 @@
-# ADR-001: Rebuild rather than refactor the capstone prototype
+# ADR-0001: Rebuild rather than refactor the capstone prototype
 
 **Status:** Accepted
 
