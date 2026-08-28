@@ -1,4 +1,4 @@
-# ADR-005: Persistence Layer — Postgres as System of Record, Redis for Ephemeral Coordination
+# ADR-0005: Persistence Layer — Postgres as System of Record, Redis for Ephemeral Coordination
 
 ## Status
 Accepted

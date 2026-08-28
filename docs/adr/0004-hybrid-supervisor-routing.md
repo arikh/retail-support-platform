@@ -1,4 +1,4 @@
-# ADR-004: Hybrid supervisor routing — rules first, LLM fallback
+# ADR-0004: Hybrid supervisor routing — rules first, LLM fallback
 
 **Status:** Accepted · 24 July 2026
 
