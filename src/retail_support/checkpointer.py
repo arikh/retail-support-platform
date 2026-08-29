@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-load_dotenv()
+load_dotenv() # TODO(env): temporary — centralize at app entry point, strip from modules
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
