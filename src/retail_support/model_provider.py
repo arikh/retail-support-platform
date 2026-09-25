@@ -8,7 +8,7 @@ from langchain_groq import ChatGroq
 
 load_dotenv()  # TODO(env): temporary — centralize at app entry point, strip from modules
 
-Role = Literal["supervisor", "support"]
+Role = Literal["supervisor", "support", "analysis"]
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,7 @@ class ModelSpec:
 ROLE_SPECS: dict[Role, ModelSpec] = {
     "supervisor": ModelSpec("groq", "openai/gpt-oss-120b", 0.0, None),
     "support": ModelSpec("groq", "openai/gpt-oss-120b", 0.0, None),
+    "analysis": ModelSpec("groq", "openai/gpt-oss-120b", 0.0, None),
 }
 
 
