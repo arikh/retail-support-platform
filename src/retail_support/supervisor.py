@@ -7,8 +7,10 @@ from retail_support.state import SupportState
 def route(state: SupportState)->str:
     if state["step_count"] > MAX_STEPS:
         return END
-
-    return "support"
+    if state["next"] in {"support", "analysis"}:
+        return state["next"]
+    
+    return END
 
 def supervisor(state: SupportState)->dict:
     return {}
