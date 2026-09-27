@@ -42,6 +42,29 @@ def route(state: SupportState)->str:
     return END
 
 async def supervisor(state: SupportState)->dict:
+    
+    if state['errors']:
+        return {
+            "next": "terminate",
+            "status": "failed",
+            "step_count": 1,
+        }
+    
+    if state['support_findings'] is not None or state['analysis_findings'] is not None:
+        return {
+            "next": "terminate",
+            "status": "done",
+            "step_count": 1,
+        }
+    
+    if state['step_count'] > MAX_STEPS:
+        return {
+            "next": "terminate",
+            "status": "failed",
+            "errors": ["max steps exceeded"],
+            "step_count": 1,
+        }
+    
     try:
         llm = ModelProvider.get(role="supervisor")
         classifier = llm.with_structured_output(RoutingDecision)
@@ -54,5 +77,5 @@ async def supervisor(state: SupportState)->dict:
             "errors": [f"{type(e).__name__}: {e}"],
             "step_count": 1,
         }
-    
+
     return {"next": decision.next, "step_count": 1}
