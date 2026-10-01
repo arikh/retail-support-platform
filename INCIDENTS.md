@@ -9,6 +9,7 @@ Each entry: what happened, why, what changed, and the numbers.
 | INC-002 | Run ended but status still said `running` | 3 | Fixed |
 | INC-003 | Compound question only half answered | 3 | Open |
 | INC-004 | Model invented an answer for a plan that doesn't exist | 3 | Open |
+| INC-005 | Worker crashed when the model refused to fill the schema | 3 | Open |
 
 ---
 
@@ -175,5 +176,60 @@ Planned:
 ### Lesson
 Structured output guarantees the **shape** of an answer, not its **truth**.
 An agent without grounding will still fill every field.
+
+---
+
+## INC-005 · Worker crashed when the model refused to fill the schema
+
+**Date:** 2026-10-01
+**Module:** 3 · Supervisor Topology & Worker Wrapping
+**Status:** Open (fix planned)
+
+### Symptom
+The compound question (plan P-100 status + Q3 rejection patterns) failed
+with a provider error. The model's own reply, inside the error, was an
+honest "I don't have this data — please share it."
+
+```
+support_findings: None
+analysis_findings: None
+errors: ["BadRequestError: Error code: 400 - {'error': {'message': 'Tool choice is required, but model did not call a tool', 'type': 'invalid_request_error', 'code': 'tool_use_failed', 'failed_generation': 'I'm not able to see the current details of plan P-100 or the rejection-reason data for your Q3 plans. Could you share the relevant information ...'}}"]
+status: failed
+```
+
+The same question gave a made-up `analyzed` answer on an earlier run
+(see INC-003). Same input, different behaviour across runs.
+
+### Cause
+Structured output works by forcing the model to call a "tool" that fills
+the findings schema. The workers have **no system prompt**, so nothing
+tells the model: "if you have no data, return `not_found` / `bad_data`."
+With no data and no instruction, the model answered in plain text instead
+of calling the tool, and Groq rejected the response (`tool_use_failed`).
+
+### What worked
+The supervisor's errors rule caught the worker error and stopped the run
+at step 3 with `status: failed`. Before INC-001's fix, this would have
+looped to the max-steps limit.
+
+### Fix
+Planned, with the B4 support tools:
+- Give each worker a system prompt that defines when to use `not_found`
+  (support) and `bad_data` (analysis).
+- Ground workers in real tool data so "no data" becomes an explicit result,
+  not a guess.
+- Decide whether `tool_use_failed` deserves one retry before failing.
+
+### Before / after
+| Metric | Before | After |
+|---|---|---|
+| Result on "no data" | crash (`tool_use_failed`) or fabricated answer | — |
+| Expected | `not_found` / `bad_data` | — |
+| Steps to stop on worker error | 3 (errors rule worked) | — |
+
+### Lesson
+Structured output forces an answer's shape, but gives the model no honest
+way out unless the schema and prompt define one. Missing "I don't know"
+paths turn honesty into crashes — or into fabrication.
 
 ---
