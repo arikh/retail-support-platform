@@ -34,8 +34,6 @@ class RoutingDecision(BaseModel):
 
 
 def route(state: SupportState)->str:
-    if state["step_count"] > MAX_STEPS:
-        return END
     if state["next"] in {"support", "analysis"}:
         return state["next"]
     
