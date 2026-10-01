@@ -42,7 +42,8 @@ class PendingApproval(BaseModel):
 
 
 class SupportState(TypedDict):
-    messages: Annotated[list[AnyMessage], add_messages]  # history -> append
+    # conversation -> append (LLM context, kept across questions)
+    messages: Annotated[list[AnyMessage], add_messages]  
 
     status: Literal[
         "running", "awaiting_human", "done", "failed"
