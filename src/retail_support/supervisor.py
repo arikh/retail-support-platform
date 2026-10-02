@@ -9,7 +9,7 @@ from retail_support.config import MAX_STEPS
 from retail_support.model_provider import ModelProvider
 from retail_support.state import SupportState
 
-ROUTING_SYSTEM_PROMPT = """You are a routing classifier for a retail pricing-operations support platform. This platform generates country-specific retail prices for a retailer's materials (products) from submitted pricing plans. You do NOT answer the user's question — you only decide which specialist worker should handle it.
+ROUTING_SYSTEM_PROMPT = """You are a routing classifier for a retail pricing-operations support platform. This platform generates country-specific retail prices for a retailer's materials (products) from submitted pricing plans. You do NOT answer the user's question — you only decide which specialist workers should handle it.
 
 Choose "support" when the request is about ONE specific pricing plan or material:
 - the status of a named plan
@@ -25,55 +25,86 @@ Choose "analysis" when the request is about PATTERNS ACROSS MANY plans, material
 - aggregate breakdowns across the dataset
 These require investigating data broadly, not a single lookup.
 
-If the request names one specific plan or material, choose "support".
-If it asks about trends, patterns, comparisons, or anomalies across many, choose "analysis".
-When genuinely unsure, choose "support"."""
+Return every worker the request needs, as a list.
+If the request names one specific plan or material, include "support".
+If it asks about trends, patterns, comparisons, or anomalies across many, include "analysis".
+If the request has both kinds of parts, return both.
+If the request fits neither worker, or you are genuinely unsure, return an empty list. Do not guess."""
 
-class RoutingDecision(BaseModel):
-    next: Literal["support", "analysis"]
+class RoutingPlan(BaseModel):
+    workers: list[Literal["support", "analysis"]]
 
 
-def route(state: SupportState)->str:
-    if state["next"] in {"support", "analysis"}:
-        return state["next"]
-    
+FINDINGS_FIELD: dict[str, str] = {
+    "support": "support_findings",
+    "analysis": "analysis_findings",
+}
+
+
+def pending_workers(state: SupportState, plan: list[str]) -> list[str]:
+    """Workers in the plan whose drawer is still empty."""
+    return [worker for worker in plan if state[FINDINGS_FIELD[worker]] is None]
+
+
+def route(state: SupportState) -> list[str] | str:
+    allowed = [worker for worker in state["next"] if worker in FINDINGS_FIELD]
+    if allowed:
+        return allowed
     return END
 
-async def supervisor(state: SupportState)->dict:
-    
-    if state['errors']:
+
+async def supervisor(state: SupportState) -> dict:
+    plan = state["plan"]
+
+    if state["errors"]:
         return {
-            "next": "terminate",
+            "next": [],
             "status": "failed",
             "step_count": 1,
         }
-    
-    if state['support_findings'] is not None or state['analysis_findings'] is not None:
+
+    if plan and not pending_workers(state, plan):
         return {
-            "next": "terminate",
+            "next": [],
             "status": "done",
             "step_count": 1,
         }
-    
-    if state['step_count'] > MAX_STEPS:
+
+    if state["step_count"] > MAX_STEPS:
         return {
-            "next": "terminate",
+            "next": [],
             "status": "failed",
             "errors": ["max steps exceeded"],
             "step_count": 1,
         }
-    
-    try:
-        llm = ModelProvider.get(role="supervisor")
-        classifier = llm.with_structured_output(RoutingDecision)
-        messages = [SystemMessage(content=ROUTING_SYSTEM_PROMPT), *state["messages"]]
-        decision = await classifier.ainvoke(messages)
-    except Exception as e:
+
+    if plan is None:
+        try:
+            llm = ModelProvider.get(role="supervisor")
+            classifier = llm.with_structured_output(RoutingPlan)
+            messages = [SystemMessage(content=ROUTING_SYSTEM_PROMPT), *state["messages"]]
+            decision = await classifier.ainvoke(messages)
+        except Exception as e:
+            return {
+                "next": [],
+                "status": "failed",
+                "errors": [f"{type(e).__name__}: {e}"],
+                "step_count": 1,
+            }
+        plan = list(dict.fromkeys(decision.workers))
+
+    if not plan:
         return {
-            "next": "terminate",
+            "plan": [],
+            "next": [],
             "status": "failed",
-            "errors": [f"{type(e).__name__}: {e}"],
+            "errors": ["no worker matched"],
             "step_count": 1,
         }
 
-    return {"next": decision.next, "step_count": 1}
+    return {
+        "plan": plan,
+        "next": pending_workers(state, plan),
+        "step_count": 1,
+    }
+    

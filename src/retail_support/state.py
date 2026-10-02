@@ -37,6 +37,7 @@ class PendingApproval(BaseModel):
     details: dict
     requested_by: str
 
+WorkerName = Literal["support", "analysis", "escalation"]
 
 # --- Shared graph state (TypedDict: trusted, program-written, ADR-003) ---
 
@@ -44,16 +45,19 @@ class PendingApproval(BaseModel):
 class SupportState(TypedDict):
     # conversation -> append (LLM context, kept across questions)
     messages: Annotated[list[AnyMessage], add_messages]  
-
+    
     status: Literal[
         "running", "awaiting_human", "done", "failed"
     ]  # current lifecycle value -> overwrite (supervisor owns)
-    next: str  # routing decision, a value never prose -> overwrite (ADR-004)
+    next: list[str]  # routing decision, a value never prose -> overwrite (ADR-004)
     step_count: Annotated[int, operator.add]  # loop breaker -> accumulate
     errors: Annotated[list[str], operator.add]  # failure trail -> append
     pending_approval: (
         PendingApproval | None
     )  # HITL request -> overwrite, None until paused
+    
+    # to-do list of workers -> overwrite (supervisor owns), None until planned
+    plan: list[WorkerName] | None
 
     support_findings: SupportFindings | None  # overwrite (support owns)
     analysis_findings: AnalysisFindings | None  # overwrite (analysis owns)
