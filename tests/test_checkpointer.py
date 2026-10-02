@@ -1,11 +1,11 @@
-import uuid
 import asyncio
-import pytest
-from langgraph.graph import StateGraph, START, END
-from langchain_core.messages import HumanMessage
+import uuid
 
-from retail_support.state import SupportState
+from langchain_core.messages import HumanMessage
+from langgraph.graph import END, START, StateGraph
+
 from retail_support.checkpointer import get_checkpointer
+from retail_support.state import SupportState
 
 
 def bump(state):
@@ -85,7 +85,8 @@ async def test_checkpoint_resume_after_crash():
         snapshot = await app.aget_state(config)
         assert snapshot.values["step_count"] == 2
 
-# @pytest.mark.xfail(reason="no lock yet; expected 3, gets 2 — passes when Redis lock lands")
+# @pytest.mark.xfail(reason="no lock yet; expected 3, 
+# gets 2 — passes when Redis lock lands")
 async def test_concurrent_lost_update_without_lock():
     thread_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
@@ -109,7 +110,8 @@ async def test_concurrent_lost_update_without_lock():
 
         snapshot = await app.aget_state(config)
         print(snapshot.values["step_count"])
-        assert snapshot.values["step_count"] == 2  # lost update — one concurrent +1 dropped. With Redis lock → 3.
+        # lost update — one concurrent +1 dropped. With Redis lock → 3.
+        assert snapshot.values["step_count"] == 2  
 
 
 async def test_durable_resume_new_instance():

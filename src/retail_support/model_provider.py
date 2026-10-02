@@ -1,12 +1,13 @@
 import os
 from dataclasses import dataclass
 from typing import Literal
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_groq import ChatGroq
 
-load_dotenv()  # TODO(env): temporary — centralize at app entry point, strip from modules
+# TODO(env): temporary — centralize at app entry point, strip from modules
+load_dotenv()  
 
 Role = Literal["supervisor", "support", "analysis"]
 
