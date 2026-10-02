@@ -101,7 +101,7 @@ node. A stop that can't record why it stopped leaves state lying.
 
 **Date:** 2026-09-27
 **Module:** 3 · Supervisor Topology & Worker Wrapping
-**Status:** Open (fix planned)
+**Status:** Fixed
 
 ### Symptom
 A question with two parts — one for `support`, one for `analysis` — was
@@ -123,17 +123,21 @@ one question needs exactly one worker. The classifier can also return only
 one label, so it can never ask for both workers.
 
 ### Fix
-Planned: planner (option C). The classifier returns a **list** of workers;
-code runs the list and stops only when every planned findings field is
-filled. The LLM plans, code decides when to stop. To be built in Module 3,
-before the checkpointer, because it adds a state field.
+The supervisor now plans a list of workers and runs them together. The run
+is `done` only when every planned findings field is filled.
+
+**Proof:** `tests/test_supervisor.py::test_two_planned_workers_run_and_finish`
+(both findings filled, `step_count: 4`, `status: done`).
+
+**Note:** with the real LLM, this question now ends `failed`, because both
+workers hit INC-005 (open). That is an honest failure, not a false `done`.
 
 ### Before / after
 | Metric | Before | After |
 |---|---|---|
-| Parts of the question answered | 1 of 2 | — |
-| Workers run vs needed | 1 of 2 | — |
-| Reported `status` | `done` (wrong) | — |
+| Workers run vs needed | 1 of 2 | 2 of 2 |
+| Parts of the question answered | 1 of 2 | 2 of 2 in the test (fake workers); real run blocked by INC-005 |
+| Reported `status` | `done` (wrong) | `done` only when both are filled; otherwise `failed` |
 
 ### Lesson
 A stop rule encodes an assumption about the work. Test it with inputs that
