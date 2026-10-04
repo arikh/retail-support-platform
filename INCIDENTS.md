@@ -275,15 +275,26 @@ This was not visible before the checkpointer, because every run started with
 an empty conversation.
 
 ### Fix
-Planned, not built: when a question is `done`, add the answer to `messages`,
-so the history reads question, answer, question.
+A new last node, `finish_question`, closes every question. It writes the
+answer into `messages` as an AI message: the planned workers' summaries when
+the run is `done`, a fixed sentence when it is `failed`. `route()` now sends
+to `finish_question` instead of `END`. The planner prompt also says to plan
+only for the latest user message.
+
+**Proof:** the same two questions in one conversation (4 Oct 2026), and
+`tests/test_supervisor.py::test_two_planned_workers_run_and_finish`, which
+asserts the answer message.
+
+**Note:** the real-LLM proof is a single run. The test checks the mechanism
+without an LLM.
 
 ### Before / after
 | Metric | Before | After |
 |---|---|---|
-| Workers planned for question 2 | 2 (expected 1) | — |
-| `step_count` for question 2 | 4 (expected 3) | — |
-| Old question answered again | yes | — |
+| Workers planned for question 2 | 2 (expected 1) | 1 |
+| `step_count` for question 2 | 4 (expected 3) | 3 |
+| Old question answered again | yes | no |
+| Messages after two questions | 2 | 4 |
 
 ### Lesson
 Memory that keeps the questions but not the answers makes every old question
