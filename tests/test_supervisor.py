@@ -32,7 +32,7 @@ def build_test_graph(checkpointer=None):
 
 
 async def test_two_planned_workers_run_and_finish():
-    app = build_test_graph()
+    graph = build_test_graph()
     question = "Status of P-100? Top rejection reasons in Q3?"
     state = {
             "messages": [HumanMessage(question)],
@@ -46,10 +46,11 @@ async def test_two_planned_workers_run_and_finish():
             "analysis_findings": None,
             "escalation_findings": None,
         }
-    result = await app.ainvoke(state)
+    result = await graph.ainvoke(state)
     assert result["status"] == "done"
     assert result["step_count"] == 4
     assert result["support_findings"] is not None
     assert result["analysis_findings"] is not None
     assert result["errors"] == []
+    
 
