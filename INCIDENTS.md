@@ -237,3 +237,54 @@ way out unless the schema and prompt define one. Missing "I don't know"
 paths turn honesty into crashes — or into fabrication.
 
 ---
+
+## INC-006 · Old question answered again in the same conversation
+
+**Date:** 2026-10-04
+**Module:** 3 · Supervisor Topology & Worker Wrapping
+**Status:** Open
+
+### Symptom
+Two questions were asked in one conversation (same `thread_id`, in-memory
+checkpointer). The second question was only about rejection reasons, but the
+supervisor planned both workers, and both workers answered the first question
+(plan P-100) again.
+
+Question 1: *"What is the status of plan P-100?"*
+Question 2: *"What are the most common rejection reasons across all our Q3
+plans?"*
+
+```
+messages so far: 2
+plan: ['support', 'analysis']
+step_count: 4
+status: done
+```
+
+Expected for question 2: `plan: ['analysis']`, `step_count: 3`.
+
+### Cause
+`messages` keeps only the user's questions. Workers write their answers into
+the findings fields, and those are cleared at the start of each new question.
+Nothing writes the answer back into `messages`.
+
+The planner and the workers read all of `messages`. They see question 1 with
+no answer after it, so it looks like it is still open.
+
+This was not visible before the checkpointer, because every run started with
+an empty conversation.
+
+### Fix
+Planned, not built: when a question is `done`, add the answer to `messages`,
+so the history reads question, answer, question.
+
+### Before / after
+| Metric | Before | After |
+|---|---|---|
+| Workers planned for question 2 | 2 (expected 1) | — |
+| `step_count` for question 2 | 4 (expected 3) | — |
+| Old question answered again | yes | — |
+
+### Lesson
+Memory that keeps the questions but not the answers makes every old question
+look open.
