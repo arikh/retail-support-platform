@@ -2,12 +2,11 @@
 from typing import Literal
 
 from langchain_core.messages import SystemMessage
-from langgraph.graph import END
 from pydantic import BaseModel
 
 from retail_support.config import MAX_STEPS
 from retail_support.model_provider import ModelProvider
-from retail_support.state import SupportState
+from retail_support.state import FINDINGS_FIELD, SupportState
 
 ROUTING_SYSTEM_PROMPT = """You are a routing classifier for a retail pricing-operations support platform. This platform generates country-specific retail prices for a retailer's materials (products) from submitted pricing plans. You do NOT answer the user's question — you only decide which specialist workers should handle it.
 
@@ -29,16 +28,11 @@ Return every worker the request needs, as a list.
 If the request names one specific plan or material, include "support".
 If it asks about trends, patterns, comparisons, or anomalies across many, include "analysis".
 If the request has both kinds of parts, return both.
-If the request fits neither worker, or you are genuinely unsure, return an empty list. Do not guess."""
+If the request fits neither worker, or you are genuinely unsure, return an empty list. Do not guess.
+Plan only for the latest user message. Earlier messages and answers are context only."""
 
 class RoutingPlan(BaseModel):
     workers: list[Literal["support", "analysis"]]
-
-
-FINDINGS_FIELD: dict[str, str] = {
-    "support": "support_findings",
-    "analysis": "analysis_findings",
-}
 
 
 def pending_workers(state: SupportState, plan: list[str]) -> list[str]:
@@ -50,7 +44,8 @@ def route(state: SupportState) -> list[str] | str:
     allowed = [worker for worker in state["next"] if worker in FINDINGS_FIELD]
     if allowed:
         return allowed
-    return END
+    
+    return "finish_question"
 
 
 async def supervisor(state: SupportState) -> dict:

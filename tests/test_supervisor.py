@@ -1,6 +1,7 @@
 from langchain_core.messages import HumanMessage
-from langgraph.graph import START, StateGraph
+from langgraph.graph import END, START, StateGraph
 
+from retail_support.finish_question import finish_question
 from retail_support.state import AnalysisFindings, SupportFindings, SupportState
 from retail_support.supervisor import route, supervisor
 
@@ -23,10 +24,12 @@ def build_test_graph(checkpointer=None):
     builder.add_node("supervisor", supervisor)
     builder.add_node("support", fake_support)
     builder.add_node("analysis", fake_analysis)
+    builder.add_node("finish_question", finish_question)
     builder.add_edge(START, "supervisor")
     builder.add_conditional_edges("supervisor", route)
     builder.add_edge("support", "supervisor")
     builder.add_edge("analysis", "supervisor")
+    builder.add_edge("finish_question", END)
 
     return builder.compile(checkpointer=checkpointer)
 
@@ -52,5 +55,6 @@ async def test_two_planned_workers_run_and_finish():
     assert result["support_findings"] is not None
     assert result["analysis_findings"] is not None
     assert result["errors"] == []
+    assert result["messages"][-1].content == "fake\n\nfake"
     
 

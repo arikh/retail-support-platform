@@ -39,6 +39,11 @@ class PendingApproval(BaseModel):
 
 WorkerName = Literal["support", "analysis", "escalation"]
 
+FINDINGS_FIELD: dict[str, str] = {
+    "support": "support_findings",
+    "analysis": "analysis_findings",
+}
+
 # --- Shared graph state (TypedDict: trusted, program-written, ADR-003) ---
 
 
