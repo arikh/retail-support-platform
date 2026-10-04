@@ -17,7 +17,9 @@ def build_graph(checkpointer=None):
     builder.add_node("finish_question", finish_question)
     builder.add_edge(START, "start_question")
     builder.add_edge("start_question", "supervisor")
-    builder.add_conditional_edges("supervisor", route)
+    builder.add_conditional_edges(
+        "supervisor", route, ["support", "analysis", "finish_question"]
+    )
     builder.add_edge("support", "supervisor")
     builder.add_edge("analysis", "supervisor")
     builder.add_edge("finish_question", END)
