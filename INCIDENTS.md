@@ -7,9 +7,13 @@ Each entry: what happened, why, what changed, and the numbers.
 |---|---|---|---|
 | INC-001 | Supervisor never stopped | 3 | Fixed |
 | INC-002 | Run ended but status still said `running` | 3 | Fixed |
-| INC-003 | Compound question only half answered | 3 | Open |
-| INC-004 | Model invented an answer for a plan that doesn't exist | 3 | Open |
-| INC-005 | Worker crashed when the model refused to fill the schema | 3 | Open |
+| INC-003 | Compound question only half answered | 3 | Fixed |
+| INC-004 | Model invented an answer for a plan that doesn't exist | 3 | Fixed |
+| INC-005 | Worker crashed when the model refused to fill the schema | 3 | Open (support fixed, analysis pending) |
+| INC-006 | Old question answered again in the same conversation | 3 | Fixed |
+| INC-007 | Groq rejected JSON mode together with tools | 3 | Fixed |
+| INC-008 | Model misspelled the findings tool name; retry did not help | 3 | Fixed |
+| INC-009 | Worker returned nothing and the supervisor silently ran it again | 3 | Fixed |
 
 ---
 
@@ -149,7 +153,7 @@ break the assumption — not only the happy path.
 
 **Date:** 2026-09-27
 **Module:** 3 · Supervisor Topology & Worker Wrapping
-**Status:** Open (fix planned)
+**Status:** Fixed
 
 ### Symptom
 Asked about plan P-100. No such plan exists — there is no data and no tools
@@ -167,15 +171,24 @@ look up, the model filled the structured output from its imagination. The
 schema allows `not_found`, but nothing forces the model to use it.
 
 ### Fix
-Planned:
-- Build the 5 support tools against real Postgres data (Module 3, B4).
-- Add a test: an unknown plan must return `not_found`, never `resolved`.
+The support worker now runs a tool-calling agent over real Postgres data
+(four support tools, read-only connection). Its prompt says: always call a
+tool, never invent, and say plainly when something is not found. The tools
+return a clear "not found" sentence for an unknown plan or material.
+
+**Proof:** in every real run on 2026-10-05, the P-100 question came back as
+`not_found` with nothing invented. At tool level,
+`tests/test_support_tools.py` checks that an unknown plan or material
+returns "not found" for all four tools.
+
+**Note:** there is no automated end-to-end test with a real LLM for this
+question; the end-to-end evidence is the real runs.
 
 ### Before / after
 | Metric | Before | After |
 |---|---|---|
-| Unknown plan → status | `resolved` (fabricated) | — |
-| Expected | `not_found` | — |
+| Unknown plan → status | `resolved` (fabricated) | `not_found` |
+| Source of the answer | the model's imagination | a tool reading Postgres |
 
 ### Lesson
 Structured output guarantees the **shape** of an answer, not its **truth**.
@@ -187,7 +200,7 @@ An agent without grounding will still fill every field.
 
 **Date:** 2026-10-01
 **Module:** 3 · Supervisor Topology & Worker Wrapping
-**Status:** Open (fix planned)
+**Status:** Open (support fixed, analysis pending)
 
 ### Symptom
 The compound question (plan P-100 status + Q3 rejection patterns) failed
@@ -217,19 +230,23 @@ at step 3 with `status: failed`. Before INC-001's fix, this would have
 looped to the max-steps limit.
 
 ### Fix
-Planned, with the B4 support tools:
-- Give each worker a system prompt that defines when to use `not_found`
-  (support) and `bad_data` (analysis).
-- Ground workers in real tool data so "no data" becomes an explicit result,
-  not a guess.
-- Decide whether `tool_use_failed` deserves one retry before failing.
+Done for the support worker (2026-10-05):
+- It has a system prompt and real tools, so "no data" is an explicit result
+  (`not_found`), not a refusal.
+- Findings are no longer requested as a forced tool call. The agent writes a
+  plain text answer; a second call with no tools turns it into findings with
+  strict JSON output (see INC-008).
+- A failed agent run is tried once more, then reported as an error in state.
+
+Still open: the analysis worker is the old single call with no prompt and no
+tools. It gets the same treatment next.
 
 ### Before / after
 | Metric | Before | After |
 |---|---|---|
-| Result on "no data" | crash (`tool_use_failed`) or fabricated answer | — |
-| Expected | `not_found` / `bad_data` | — |
-| Steps to stop on worker error | 3 (errors rule worked) | — |
+| Support: result on "no data" | crash (`tool_use_failed`) or fabricated answer | `not_found` |
+| Analysis: result on "no data" | crash or fabricated answer | pending |
+| Steps to stop on worker error | 3 (errors rule worked) | 3 |
 
 ### Lesson
 Structured output forces an answer's shape, but gives the model no honest
@@ -242,7 +259,7 @@ paths turn honesty into crashes — or into fabrication.
 
 **Date:** 2026-10-04
 **Module:** 3 · Supervisor Topology & Worker Wrapping
-**Status:** Open
+**Status:** Fixed
 
 ### Symptom
 Two questions were asked in one conversation (same `thread_id`, in-memory
@@ -299,3 +316,141 @@ without an LLM.
 ### Lesson
 Memory that keeps the questions but not the answers makes every old question
 look open.
+
+---
+
+## INC-007 · Groq rejected JSON mode together with tools
+
+**Date:** 2026-10-05
+**Module:** 3 · Supervisor Topology & Worker Wrapping
+**Status:** Fixed
+
+### Symptom
+The first run of the support worker as a tool-calling agent failed on all
+four test questions with the same provider error.
+
+```
+errors: ["BadRequestError: Error code: 400 - {'error': {'message': 'json mode cannot be combined with tool/function calling', 'type': 'invalid_request_error', 'param': 'response_format'}}"]
+status: failed
+```
+
+### Cause
+The agent was created with `response_format=SupportFindings`. Given a bare
+schema, LangChain picks the method itself, and it picked the provider's JSON
+mode. Groq does not allow JSON mode in the same request as tool calling.
+
+### What worked
+Every run stopped at step 3 with `status: failed` and the error in state.
+No crash.
+
+### Fix
+First step: choose the method explicitly, `ToolStrategy(SupportFindings)`.
+That answered 3 of 4 questions and exposed INC-008. The final design is the
+split described there.
+
+### Before / after
+| Metric | Before | After |
+|---|---|---|
+| Test questions answered | 0 of 4 | 3 of 4 (then 4 of 4 after INC-008) |
+
+### Lesson
+A framework default that picks a method for you depends on the provider.
+Choose the method explicitly, and prove it with a real call.
+
+---
+
+## INC-008 · Model misspelled the findings tool name; retry did not help
+
+**Date:** 2026-10-05
+**Module:** 3 · Supervisor Topology & Worker Wrapping
+**Status:** Fixed
+
+### Symptom
+With `ToolStrategy`, one question kept failing. The model had the right
+answer but wrote the name of the findings tool wrongly, and Groq rejected
+the reply.
+
+Question: *"Why was M-1009 excluded from SUMMER_LATAM_V2?"*
+
+```
+errors: ["BadRequestError: Error code: 400 - ... attempted to call tool 'name=SupportFindings]' which was not in request.tools ... 'code': 'tool_use_failed' ..."]
+status: failed
+```
+
+It failed in 2 of 3 runs. A retry (2 attempts) was added and the second
+attempt made the same mistake.
+
+### Cause
+The findings were requested as one more tool call, next to the four real
+tools. Nothing forces a model to spell a tool name correctly. The same input
+at temperature 0 tends to give the same output, so a retry does little for
+this kind of failure.
+
+### Fix
+Split the worker's two jobs:
+1. The agent with tools finds the facts and writes a plain text answer.
+2. A second call with no tools turns that text into the findings, using
+   strict JSON output (`with_structured_output(..., method="json_schema")`).
+
+Both live in `agent_runner.py` (`run_agent`, `to_findings`) and are shared by
+the workers. The retry stays, for other kinds of failure.
+
+**Proof:** the same question came back `resolved` in 3 of 3 runs after the
+change. `tests/test_agent_runner.py` (4 tests, no LLM) covers retry, giving
+up, an empty answer, and the strict JSON call.
+
+**Cost:** one extra LLM call per worker run.
+
+### Before / after
+| Metric | Before | After |
+|---|---|---|
+| This question answered | 1 of 3 runs | 3 of 3 runs |
+| Test questions answered | 3 of 4 | 4 of 4 |
+| LLM calls per worker run | tool loop | tool loop + 1 |
+
+### Lesson
+If one step keeps failing the same way, a retry repeats the failure. Remove
+the fragile step instead of repeating it.
+
+---
+
+## INC-009 · Worker returned nothing and the supervisor silently ran it again
+
+**Date:** 2026-10-05
+**Module:** 3 · Supervisor Topology & Worker Wrapping
+**Status:** Fixed
+
+### Symptom
+A question was answered correctly, but the run took 5 steps instead of 3.
+No error was recorded.
+
+```
+question: What is the status of plan SUMMER_LATAM_V2?
+step_count: 5
+errors: []
+status: done
+```
+
+At the same time a unit test failed with `DID NOT RAISE`.
+
+### Cause
+The first version of the retry helper did not raise after its last failed
+attempt. The worker then returned no findings and no error. The supervisor
+saw an empty findings field with no error, treated the worker as still
+pending, and sent the question to it again.
+
+### Fix
+- `run_agent` raises the last real error when all attempts fail.
+- An empty answer counts as a failed attempt.
+- Tests: `test_run_agent_gives_up_after_all_attempts` and
+  `test_run_agent_rejects_empty_answer`.
+
+### Before / after
+| Metric | Before | After |
+|---|---|---|
+| `step_count` for a one-worker question | 5 | 3 |
+| Failed worker run recorded as an error | no | yes |
+
+### Lesson
+A step counter is also a detector. A right answer with an unexpected step
+count means hidden work.
