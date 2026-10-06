@@ -29,7 +29,7 @@ covers it.
 | Part | What it does | Tests |
 |---|---|---|
 | State contract | `TypedDict` graph state, Pydantic findings validated where LLM output enters (ADR-0003) | `tests/test_state.py` |
-| Checkpointing | Postgres checkpoints; a paused run resumes from a new checkpointer instance | `tests/test_checkpointer.py` |
+| Checkpointing | Postgres checkpoints; a paused run resumes from a new checkpointer instance; the full graph keeps a conversation across instances | `tests/test_checkpointer.py`, `tests/test_graph.py` |
 | Supervisor | Plans once with an LLM: which workers, and one question for each. Stop rules run in code: errors, plan complete, step limit (ADR-0011) | `tests/test_supervisor.py` |
 | Routing gate | `route()` lets through only worker names that exist | `tests/test_supervisor.py` |
 | Graph | Planned workers run together; one failing worker ends the run as `failed`; an off-topic question stops in one step | `tests/test_graph.py` |
@@ -61,8 +61,6 @@ not as automated tests.
 
 ### Known limits
 
-- The full graph has been run with the in-memory checkpointer only. The
-  Postgres checkpointer is tested on small graphs, not yet on the full one.
 - Checkpoints are loaded with an allowlist of the platform's own types
   (`checkpointer.py`). No test asserts that an unlisted type is refused.
 - When one of two planned workers fails, the whole question is reported as

@@ -3,12 +3,13 @@
 These use the real wiring from graph.py (build_graph), with a fake planner
 and fake workers. No LLM and no database are used.
 """
+import uuid
 
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from retail_support.agent_runner import worker_messages
-from retail_support.checkpointer import build_serde
+from retail_support.checkpointer import build_serde, get_checkpointer
 from retail_support.finish_question import FAILED_ANSWER
 from retail_support.graph import build_graph
 from retail_support.state import AnalysisFindings, SupportFindings
@@ -137,3 +138,27 @@ async def test_second_question_starts_clean_and_sees_the_first_answer(use_planne
     # The planner saw the first question together with its answer (INC-006).
     asked = [message.content for message in planner.seen[1][1:]]
     assert asked == ["first question", "support answer", "second question"]
+
+async def test_full_graph_on_the_postgres_checkpointer(use_planner):
+    use_planner(
+        [("support", "first question")],
+        [("analysis", "second question")],
+    )
+    support, analysis, _ = make_workers()
+    config = {"configurable": {"thread_id": str(uuid.uuid4())}}
+
+    async with get_checkpointer() as saver:
+        graph = build_graph(saver, support=support, analysis=analysis)
+        await graph.ainvoke(ask("first question"), config)
+
+    # A new checkpointer instance: the state must come back from Postgres.
+    async with get_checkpointer() as saver:
+        graph = build_graph(saver, support=support, analysis=analysis)
+        second = await graph.ainvoke(ask("second question"), config)
+
+    assert second["status"] == "done"
+    assert second["step_count"] == 3
+    assert second["plan"] == {"analysis": "second question"}
+    assert second["support_findings"] is None
+    assert len(second["messages"]) == 4
+    assert second["messages"][-1].content == "analysis answer"

@@ -288,8 +288,6 @@ Resolved questions live in their ADRs, not here. What remains open, tagged to
 the module that closes it:
 
 **Module 4 — checkpointing & recovery**
-- Running the full platform graph on the Postgres checkpointer. So far it has
-  run on the in-memory one; Postgres is tested on small graphs.
 - Resume of a paused or crashed question in the full graph.
 
 **Module 6 — human-in-the-loop**
