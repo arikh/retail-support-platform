@@ -61,8 +61,8 @@ class SupportState(TypedDict):
         PendingApproval | None
     )  # HITL request -> overwrite, None until paused
     
-    # to-do list of workers -> overwrite (supervisor owns), None until planned
-    plan: list[WorkerName] | None
+    # worker → the question for that worker, None until planned.
+    plan: dict[str, str] | None
 
     support_findings: SupportFindings | None  # overwrite (support owns)
     analysis_findings: AnalysisFindings | None  # overwrite (analysis owns)

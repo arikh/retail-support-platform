@@ -30,3 +30,6 @@ async def to_findings(role, schema, status_guide: str, answer: str):
     structured = model.with_structured_output(schema, method="json_schema")
     messages = [SystemMessage(FORMAT_PROMPT + status_guide), HumanMessage(answer)]
     return await structured.ainvoke(messages)
+
+def worker_messages(state, worker: str) -> list:
+     return state["messages"][:-1] + [HumanMessage(state["plan"][worker])]

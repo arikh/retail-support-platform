@@ -1,7 +1,7 @@
 # ruff: noqa: E501
 from langchain.agents import create_agent
 
-from retail_support.agent_runner import run_agent, to_findings
+from retail_support.agent_runner import run_agent, to_findings, worker_messages
 from retail_support.model_provider import ModelProvider
 from retail_support.state import SupportFindings, SupportState
 from retail_support.support_tools import (
@@ -17,14 +17,13 @@ Rules:
 - Always call a tool to get the facts. Never answer from memory.
 - Never invent plans, materials, statuses, numbers, or rules.
 - Answer the latest user message. Earlier messages and answers are context only.
-- Answer only the part that is about a specific plan or material. Ignore parts about trends or patterns across many plans.
 - You are read-only. If asked to change, approve, or delete anything, do not do it, and say that you cannot.
 - If a tool says a plan or material was not found, say so plainly. Do not guess.
 - If the request names no plan or material you can look up, say what is missing.
 - If the data looks inconsistent or the cause is unknown, say that a developer needs to look at it.
 
 Plans are identified by plan name, for example SUMMER_LATAM_V2. Materials are identified by ID, for example M-1009.
-Write a short, factual final answer."""
+Write a short, factual final answer in plain text. No markdown."""
 
 SUPPORT_STATUS_GUIDE = """Status guide:
 - "resolved": the answer gives facts about a plan or material.
@@ -40,7 +39,7 @@ async def support_worker(state: SupportState) -> dict:
             system_prompt=SUPPORT_SYSTEM_PROMPT,
         )
         
-        answer = await run_agent(agent, state["messages"])
+        answer = await run_agent(agent, worker_messages(state, "support"))
         findings = await to_findings("support", SupportFindings, SUPPORT_STATUS_GUIDE, answer)
 
 

@@ -41,7 +41,7 @@ async def test_two_planned_workers_run_and_finish():
     question = "Status of P-100? Top rejection reasons in Q3?"
     state = {
             "messages": [HumanMessage(question)],
-            "plan": ["support", "analysis"],
+            "plan": {"support": "q1", "analysis": "q2"},
             "step_count": 0,
             "status": "running",
             "next": [],
@@ -64,7 +64,7 @@ async def test_empty_plan_fails_with_no_worker_matched():
     question = "Status of P-100? Top rejection reasons in Q3?"
     state = {
             "messages": [HumanMessage(question)],
-            "plan": [],
+            "plan": {},
             "step_count": 0,
             "status": "running",
             "next": [],

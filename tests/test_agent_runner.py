@@ -1,8 +1,8 @@
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from retail_support import agent_runner
-from retail_support.agent_runner import run_agent, to_findings
+from retail_support.agent_runner import run_agent, to_findings, worker_messages
 from retail_support.config import WORKER_ATTEMPTS
 from retail_support.state import SupportFindings
 
@@ -80,3 +80,16 @@ async def test_to_findings_uses_strict_json(monkeypatch):
     assert model.method == "json_schema"
     assert "GUIDE" in model.structured.messages[0].content
     assert model.structured.messages[1].content == "Plan X not found."
+
+
+def test_worker_messages_replaces_last_message():
+    state = {
+        "messages": [
+            HumanMessage("old question"),
+            AIMessage("old answer"),
+            HumanMessage("part A? part B?"),
+        ],
+        "plan": {"support": "part A?"},
+    }
+    messages = worker_messages(state, "support")
+    assert [m.content for m in messages] == ["old question", "old answer", "part A?"]
