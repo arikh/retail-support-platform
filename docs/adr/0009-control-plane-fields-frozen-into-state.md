@@ -1,7 +1,8 @@
 # ADR-0009: Control-plane fields frozen into the state schema
 
 ## Status
-Accepted
+Accepted. Amended by ADR-0011: `plan` was added and `next` became a list.
+Both changes were made before any real checkpoints were saved.
 
 ## Context
 Module 2 introduces Postgres checkpointing. Once a checkpoint is written, the
