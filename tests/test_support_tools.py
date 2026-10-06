@@ -69,6 +69,7 @@ async def test_rejection_reason_priced_material():
         {"material_id": "M-1001", "plan_name": "SUMMER_LATAM_V2"}
     )
     assert "successfully priced" in result
+    assert "NOT priced" not in result
 
 
 async def test_rejection_reason_unknown_material():

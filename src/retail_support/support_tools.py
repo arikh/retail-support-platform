@@ -165,12 +165,12 @@ async def get_material_rejection_reason(material_id: str, plan_name: str = "") -
                 f"Material {material_id} ({r['material_name']}) was successfully "
                 f"priced in plan '{r['plan_name']}'."
             )
-
-        lines.append (
-            f"Material {material_id} ({r['material_name']}) was NOT priced.\n"
-            f"Plan: {r['plan_name']} | "
-            f"Reason: {r['rejection_reason']} | "
-            f"Expiry: {r['expiry_months']} months"
-        )
+        else:
+            lines.append (
+                f"Material {material_id} ({r['material_name']}) was NOT priced.\n"
+                f"Plan: {r['plan_name']} | "
+                f"Reason: {r['rejection_reason']} | "
+                f"Expiry: {r['expiry_months']} months"
+            )
     
     return "\n".join(lines)

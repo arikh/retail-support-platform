@@ -8,12 +8,12 @@ from retail_support.supervisor import route, supervisor
 from retail_support.support_worker import support_worker
 
 
-def build_graph(checkpointer=None):
+def build_graph(checkpointer=None, support=support_worker, analysis=analysis_worker):
     builder = StateGraph(SupportState)
     builder.add_node("start_question", start_question)
     builder.add_node("supervisor", supervisor)
-    builder.add_node("support", support_worker)
-    builder.add_node("analysis", analysis_worker)
+    builder.add_node("support", support)
+    builder.add_node("analysis", analysis)
     builder.add_node("finish_question", finish_question)
     builder.add_edge(START, "start_question")
     builder.add_edge("start_question", "supervisor")

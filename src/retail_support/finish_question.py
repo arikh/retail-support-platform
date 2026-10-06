@@ -1,7 +1,6 @@
 from langchain_core.messages import AIMessage
 
-from retail_support.state import SupportState
-from retail_support.supervisor import FINDINGS_FIELD
+from retail_support.state import FINDINGS_FIELD, SupportState
 
 FAILED_ANSWER = "I could not answer this question."
 
