@@ -1,6 +1,6 @@
 # ADR-0004: Hybrid supervisor routing — rules first, LLM fallback
 
-**Status:** Accepted · 24 July 2026
+**Status:** Accepted · 24 July 2026 · Amended 6 Oct 2026 (see the end)
 
 ## Context
 
@@ -56,3 +56,32 @@ parsing a sentence is nondeterministic and untestable.
 
 Accepted cost of the supervisor pattern: it is a bottleneck and a single point
 of failure.
+
+## Amendment — 6 Oct 2026: what is built, and what is not
+
+This ADR was written before the code. Module 3 built part of it.
+
+**The domain changed.** The context above talks about order status, returns
+and refunds. The platform serves retail pricing operations (plan status,
+missing materials, rejection reasons, downstream propagation). See
+`docs/domain-and-requirements.md`.
+
+**Built: rules first for stopping.** Before any LLM call, the supervisor
+checks facts in code, in this order: errors → `failed`; every planned
+findings field filled → `done`; too many steps → `failed`.
+
+**Built: the decision is a value.** The LLM returns a plan — a list of tasks,
+each naming one worker from a fixed set (ADR-0011). `route()` lets through
+only worker names that exist. `next` is a list of worker names, not one.
+
+**Not built: rules first for choosing the worker.** Every new question goes
+to the LLM planner. There are no routing rules yet.
+
+**Not built: the fallback log.** Planner calls are not logged, so there is no
+fallback rate and no promotion of misses to rules.
+
+Both unbuilt parts need data about real questions before rules can be
+written. Tracing (Module 7) is the likely source of that data; when to build
+the rules is not decided yet. Until then this ADR describes the target, and
+this amendment describes the system.
+

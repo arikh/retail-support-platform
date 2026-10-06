@@ -1,22 +1,28 @@
 # retail-support-platform — Technical Design Document
 
-**Status:** Living document · Architecture phase closed (ADRs 001–008) · Module 2 (persistence) in progress
+**Status:** Living document · Modules 1–3 built and tested · Modules 4–8 planned
 **Owner:** Arikh Akher
-**Last updated:** 21 August 2026
+**Last updated:** 6 October 2026
+
+This document describes the design. Where the design and the code differ, the
+difference is marked **(planned)**. The README lists what is built and tested.
 
 ---
 
 ## 1. What we are building
 
-A production-grade retail customer-support platform built on LangGraph.
+A support platform for **retail pricing operations**, built on LangGraph. Its
+users are internal pricing-operations teams, not shoppers. See
+`docs/domain-and-requirements.md` for the domain.
 
-A **supervisor agent** receives a customer request and decides which **specialist
-worker** should handle it. Workers do the work and write their findings to a
-shared state object. The supervisor reads the findings and decides what happens
-next — another worker, a human approval, or finish.
+A **supervisor** receives a question and plans it: which **specialist
+workers** are needed, and what each one should be asked. Workers get their
+facts from real data through tools and write their findings to a shared state
+object. The supervisor reads the findings and decides in code what happens
+next — run a worker, finish, or fail. A human approval step is planned.
 
-The conversation is saved after every step, so it survives a crash and can pause
-for hours waiting for a human.
+The conversation is saved after every step, so it survives a crash and can
+pause and resume.
 
 ### Why this project exists
 
@@ -37,9 +43,9 @@ an ADR in `docs/adr/`.
 
 - Multi-agent orchestration with a supervisor and specialist workers
 - Durable state — a paused conversation survives a process restart
-- Human-in-the-loop approval for high-risk actions such as refunds
-- Full observability: tracing, cost tracking, evaluation
-- Production hardening: auth, RBAC, streaming, Docker
+- Human-in-the-loop approval for high-risk actions **(planned, Module 6)**
+- Full observability: tracing, cost tracking, evaluation **(planned, Module 7)**
+- Production hardening: auth, RBAC, streaming, Docker **(planned, Module 8)**
 
 ### Non-goals
 
@@ -53,49 +59,61 @@ an ADR in `docs/adr/`.
 
 ## 3. Architecture
 
+What is built today:
+
 ```
-            ┌────────────────────────────────────────────┐
-            │  API layer (FastAPI)                       │
-            │  auth · tenant resolution · streaming      │
-            └───────────────────┬────────────────────────┘
-                                │ invoke(state, context)
-                                ▼
    ┌───────────────────────────────────────────────────────────────┐
    │                        LANGGRAPH                              │
    │                                                               │
-   │                   ┌──────────────┐                            │
-   │             ┌────▶│  supervisor  │  rules first,              │
-   │             │     └──────┬───────┘  LLM on miss               │
-   │             │            │ writes next                        │
-   │             │  ┌─────────┼──────────┬──────────┐              │
-   │             │  ▼         ▼          ▼          ▼              │
-   │             │ support  analysis   escalation  human_gate      │
-   │             │  │         │          │          │              │
-   │             └──┴─────────┴──────────┴──────────┘              │
-   │                                                               │
-   └───────────────────────────────────────────────────────────────┘
-         │                    │                       │
-         ▼                    ▼                       ▼
-   ┌───────────┐      ┌──────────────┐        ┌──────────────┐
-   │  Postgres │      │    Redis     │        │  LangSmith / │
-   │checkpoints│      │locks + cache │        │   Langfuse   │
-   └───────────┘      └──────────────┘        └──────────────┘
+   │   START ─▶ start_question ─▶ supervisor ─▶ finish_question ─▶ END
+   │                                │   ▲                          │
+   │                 route():       │   │  workers always          │
+   │                 allowlist      ▼   │  return here             │
+   │                          ┌──────────────┐                     │
+   │                          │   support    │  planned workers    │
+   │                          │   analysis   │  run together       │
+   │                          └──────┬───────┘                     │
+   │                                 │ tools (read-only)           │
+   └─────────────────────────────────┼─────────────────────────────┘
+                                     ▼
+                          ┌─────────────────────┐
+                          │      Postgres       │
+                          │ pricing tables      │
+                          │ checkpoints (schema)│
+                          └─────────────────────┘
 ```
 
-### Workers
+Planned around it: an API layer (FastAPI) in front, the `escalation` worker
+and a human approval gate inside the graph, Redis for locks and cache, and
+tracing (Langfuse or LangSmith).
 
-| Worker | Responsibility |
+### Nodes
+
+| Node | Responsibility |
 |---|---|
-| `support` | Order lookup, policy questions, RAG over the support corpus. This is the migrated capstone agent. |
-| `analysis` | Structured data questions — order history, spend patterns, trends |
-| `escalation` | Human handoff, refund preparation, complaint routing |
+| `start_question` | Resets everything that belongs to one question (ADR-0013) |
+| `supervisor` | Plans once with an LLM; applies the stop rules in code (ADR-0011) |
+| `support` | Questions about one plan or material. Four tools. The rebuilt capstone agent |
+| `analysis` | Patterns across many plans. Three tools |
+| `finish_question` | Writes the answer into the conversation (ADR-0013) |
+| `escalation` | Human handoff **(planned, Module 6)** |
 
 Workers never call each other. All coordination goes through the supervisor.
 All data goes through state.
 
+### Inside a worker
+
+A worker does two jobs in two calls (ADR-0012): an agent with tools finds the
+facts and writes a text answer, then a second call with no tools turns that
+text into the validated findings. A failure in either becomes an entry in
+`errors`; a worker node never raises.
+
 ---
 
 ## 4. Memory model
+
+This is the design. Today only **State** is in use; Context and Store are
+**(planned)**.
 
 Three places to put a fact. The choice is decided by one question: **how long
 must this fact live?**
@@ -127,17 +145,20 @@ the conversation.**
 
 ### Shape
 
+As in `src/retail_support/state.py`:
+
 ```python
 class SupportState(TypedDict):
-    # conversation
-    messages: Annotated[list, add_messages]
+    # conversation — kept across questions
+    messages: Annotated[list[AnyMessage], add_messages]
 
     # control plane — supervisor owns these
-    next: str | None
     status: Literal["running", "awaiting_human", "done", "failed"]
+    next: list[str]                    # workers to run now
+    plan: dict[str, str] | None        # worker -> its question
     step_count: Annotated[int, operator.add]
     errors: Annotated[list[str], operator.add]
-    pending_approval: ApprovalRequest | None
+    pending_approval: PendingApproval | None
 
     # worker namespaces — one owner each
     support_findings: SupportFindings | None
@@ -145,7 +166,9 @@ class SupportState(TypedDict):
     escalation_findings: EscalationFindings | None
 ```
 
-Field names are provisional. **The four rules are not.**
+Everything except `messages` belongs to the question being answered now and
+is reset by `start_question`. Earlier questions live in the checkpoint
+history, not in state.
 
 ### Schema types
 
@@ -160,28 +183,39 @@ does not protect against the real risk, and it taxes every step.
 
 ### Schema freeze point
 
-Schema changes are free until **Module 2**, when Postgres checkpointing lands.
-After that, paused conversations hold the old shape serialized in the database,
-and a change becomes a data migration.
+The schema was frozen in Module 2 (ADR-0009), because a saved checkpoint
+holds the state shape and a later change becomes a data migration.
+
+Module 3 changed it twice on purpose: `plan` was added and `next` became a
+list (ADR-0011). Both changes were made before any real checkpoints were
+saved, so nothing had to be migrated. From the Module 3 merge on, the freeze
+applies again.
 
 ---
 
 ## 6. Supervisor routing
 
-Hybrid, rules-first:
+The supervisor runs these rules in order, in code:
 
 ```
-decision = rules.match(state)          # cheap, deterministic, testable
-if decision is None:
-    decision = llm.decide(state)       # flexible fallback
-    log_fallback(state, decision)      # every miss is recorded
-return {"next": decision}
+1. errors in state            -> status failed, stop
+2. every planned worker done  -> status done, stop
+3. step_count over the limit  -> status failed, stop
+4. no plan yet                -> ask the LLM once for the plan
+5. plan is empty              -> status failed ("no worker matched"), stop
+6. otherwise                  -> run the planned workers still pending
 ```
 
-- The routing decision is always a **value**, never prose.
-- Fallback rate is a tracked metric. A rising rate means the rules went stale.
-- Logged fallbacks are reviewed by a human and promoted to rules deliberately.
-  Promotion is a policy change, not an automatic cache write-back.
+- The LLM plans; code stops. The model is never asked "are we done?".
+- The plan is a list of tasks. Each names one worker from a fixed set and
+  carries the question for that worker.
+- `route()` is a separate allowlist gate. It lets through only worker names
+  that exist, so a wrong value in `next` cannot move control anywhere new.
+- An empty plan is the honest "I don't know" path. In Module 6 the same rule
+  will send the request to a human.
+
+**Target, not yet built (ADR-0004):** rules that choose the worker without an
+LLM call for common questions, with every LLM fallback logged and reviewed.
 
 Rejected alternatives: fixed pipeline (cannot adapt), swarm (no single place to
 pause for human approval, no clean audit trail), hierarchical (unnecessary at
@@ -194,17 +228,19 @@ Accepted for now.
 
 ## 7. Technology
 
-| Layer | Choice |
-|---|---|
-| Language | Python 3.12, `uv`, `ruff` |
-| Orchestration | LangGraph (`StateGraph`, not prebuilts) |
-| API | FastAPI |
-| Checkpoints | PostgreSQL |
-| Locks + cache | Redis |
-| Models | Provider abstraction with fallback — `ModelProvider.get(role=...)` |
-| Observability | LangSmith / Langfuse, OpenTelemetry |
-| Packaging | Docker |
-| CI | GitHub Actions |
+| Layer | Choice | State |
+|---|---|---|
+| Language | Python 3.12, `uv`, `ruff` | in use |
+| Orchestration | LangGraph `StateGraph` for the platform graph | in use |
+| Worker tool loop | LangChain `create_agent`, inside each worker node | in use |
+| Checkpoints | PostgreSQL (`AsyncPostgresSaver`), own schema | in use |
+| Business data | PostgreSQL, read-only access through `db.py` | in use |
+| Models | `ModelProvider.get(role=...)`; Groq, `openai/gpt-oss-120b` | in use, one provider |
+| Tests | `pytest`, `pytest-asyncio`; no test calls a real LLM | in use |
+| Locks + cache | Redis | planned |
+| API | FastAPI | planned |
+| Observability | Langfuse or LangSmith, OpenTelemetry | planned |
+| Packaging, CI | Docker, GitHub Actions | planned |
 
 ---
 
@@ -215,26 +251,31 @@ Accepted for now.
 | 001 | Rebuild, not refactor. Capstone archived as read-only reference. |
 | 002 | Per-worker state namespaces, not a shared findings list. Ownership over extensibility. |
 | 003 | TypedDict for graph state, Pydantic for worker findings. |
-| 004 | Hybrid routing — rules first, LLM fallback, fallbacks logged for review. |
+| 004 | Hybrid routing — rules first, LLM fallback, fallbacks logged for review. Partly built; see its amendment. |
 | 005 | Postgres as system of record; Redis ephemeral only (locks + cache). |
 | 006 | PII handling and right-to-erasure — tokenize at ingestion, vault mapping. |
 | 007 | Human-in-the-loop — pause as durable row; accept/reject/edit, expired on TTL. |
 | 008 | Irreversibility barrier — no side effect before interrupt(). |
+| 009 | Control-plane fields frozen into the state schema. |
+| 010 | Concurrency safety — locking deferred to exactly-once operations. |
+| 011 | The supervisor plans one question per worker and runs the workers together. |
+| 012 | A worker finds facts with tools, then formats its findings in a second call. |
+| 013 | Each question is opened and closed by its own node. |
 
 ---
 
 ## 9. Module roadmap
 
-| # | Module | Delivers |
-|---|---|---|
-| 1 | State Contract & Service Boundaries | The state schema, worker interfaces |
-| 2 | Persistence & Memory Architecture | Postgres checkpoints, Redis locks + cache. **Schema freezes here.** |
-| 3 | Supervisor Topology & Worker Wrapping | Routing, capstone agent migrated to `support` |
-| 4 | Checkpointing & Recovery | Crash recovery, resume, time travel |
-| 5 | Multi-Worker Orchestration | Parallel workers, `analysis` and `escalation` |
-| 6 | Human-in-the-Loop | Approval gate, review surface |
-| 7 | Observability & Cost | Tracing, cost tracking, eval dashboard |
-| 8 | Production Hardening | Auth, RBAC, streaming, Docker |
+| # | Module | Delivers | State |
+|---|---|---|---|
+| 1 | State Contract & Service Boundaries | The state schema, worker interfaces | Built |
+| 2 | Persistence & Memory Architecture | Postgres checkpoints, metadata and vault tables | Built (Redis not started) |
+| 3 | Supervisor Topology & Worker Wrapping | Planner, stop rules, support and analysis workers on real data | Built |
+| 4 | Checkpointing & Recovery | Crash recovery, resume, time travel | Planned. Per-question reset was built in Module 3 |
+| 5 | Multi-Worker Orchestration | Parallel workers, `analysis` and `escalation` | Planned. Parallel workers and `analysis` were built in Module 3 |
+| 6 | Human-in-the-Loop | `escalation` worker, approval gate, review surface | Planned |
+| 7 | Observability & Cost | Tracing, cost tracking, eval dashboard | Planned |
+| 8 | Production Hardening | Auth, RBAC, streaming, Docker | Planned |
 
 Module lifecycle is strict, one at a time:
 Architectural Concepts → Code Blueprint → Testing Suite → Interactive Challenge.
@@ -243,18 +284,25 @@ Architectural Concepts → Code Blueprint → Testing Suite → Interactive Chal
 
 ## 10. Open questions
 
-Resolved architecture questions now live in their ADRs, not here: Redis role
-(ADR-005), PII retention in checkpoints (ADR-006), pause and resume mechanics
-(ADR-007, ADR-008). What remains genuinely open, tagged to the module that
-closes it:
+Resolved questions live in their ADRs, not here. What remains open, tagged to
+the module that closes it:
 
-**Module 2 — persistence & memory**
-- What a checkpoint contains, and how resume reconstructs a run
-- Thread identity — how a conversation is addressed for checkpointing
+**Module 4 — checkpointing & recovery**
+- Running the full platform graph on the Postgres checkpointer. So far it has
+  run on the in-memory one; Postgres is tested on small graphs.
+- Resume of a paused or crashed question in the full graph.
 
 **Module 6 — human-in-the-loop**
 - The reviewer surface: what a human sees, and what state must hold for it
-  (the `pending_approval` object — decided at the schema freeze, Module 2)
+  (the contents of `pending_approval`).
+- Where code adds the `escalation` worker to a plan.
 
 **Module 7 — observability & cost**
-- Trace granularity, cost attribution, evaluation harness design
+- Trace granularity, cost attribution, evaluation harness design.
+- Whether routing rules and the fallback log (ADR-004) are built from traces.
+
+**Not assigned to a module yet**
+- One combined answer for a two-part question.
+- Showing a partial answer when one of two workers fails.
+- Filters (period, region) for the analysis tools.
+- A second model provider.

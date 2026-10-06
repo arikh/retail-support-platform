@@ -1,7 +1,7 @@
 # ADR-0011: Supervisor plans a list of workers and runs them together
 
 ## Status
-Accepted. Amends ADR-0004 and ADR-0009.
+Accepted. Amends ADR-0004 and ADR-0009. Amended on 6 Oct 2026 (see the end).
 
 ## Context
 INC-003 showed a gap. A question with two parts — one for `support`, one for
@@ -63,3 +63,43 @@ built, and returns `END` when none are left.
   `step_count: 1` with `no worker matched`.
 - `tests/test_supervisor.py::test_two_planned_workers_run_and_finish` — both
   findings filled, `step_count: 4`, `status: done`, no LLM call.
+
+## Amendment — 6 Oct 2026: the plan holds one question per worker
+
+The text above is the decision as made on 2 Oct. Two things have changed.
+
+**1. `plan` is now `dict[str, str] | None`: worker → the question for that
+worker.** The planner returns a list of tasks, each with a `worker` (a fixed
+choice of `support` or `analysis`) and a `question` (text). The supervisor
+builds the plan from them: an empty question is skipped, and two tasks for the
+same worker are joined. Each worker's agent receives the earlier conversation
+plus only its own question.
+
+Why: the known limit above ("every planned worker receives the whole
+question") caused real faults. See INC-011. Two prompt changes failed in two
+different ways, so the cause was removed instead.
+
+What did not change: the stop rule (every planned findings field filled),
+running the planned workers together, and the allowlist in `route()`. The
+question text is input for a worker. It is never read by a routing decision,
+so "the model classifies, the code routes" still holds.
+
+Risk accepted: the planner writes the questions, so it could drop a name or
+change the meaning. The prompt tells it to use the user's own words and to
+copy plan names and material IDs exactly. Code skips an empty question.
+Nothing in code checks the meaning.
+
+**2. `route()` sends the run to the `finish_question` node when no worker is
+left, not to `END`.** See ADR-0013.
+
+The known limit is closed. A new limit replaces it: when one planned worker
+fails, the whole question is reported as failed, and the other worker's
+answer is not shown to the user.
+
+### Proof
+- Real runs (6 Oct 2026): the two-part question, 2 of 2 runs — the plan held
+  two separate questions, `step_count: 4`, statuses `resolved` and `analyzed`.
+- `tests/test_graph.py::test_two_part_question_gives_each_worker_its_own_part`
+- `tests/test_supervisor.py::test_planner_merges_duplicates_and_skips_empty`
+- `tests/test_graph.py::test_one_worker_fails_and_the_run_ends_failed`
+

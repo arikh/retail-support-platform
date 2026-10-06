@@ -54,6 +54,11 @@ ReAct logic, becoming one worker under the supervisor.
 
 Writes: `support_findings` (`summary`, `status: resolved | not_found | needs_escalation`).
 
+**Built (Module 3):** four tools on the Postgres pricing tables —
+`get_plan_status`, `get_missing_materials`, `get_downstream_status`,
+`get_material_rejection_reason`. **Not built:** `escalate` (Module 6) and
+retrieval over the FAQ/policy corpus.
+
 ### `analysis` — deeper data investigation
 For questions a single tool lookup can't resolve: patterns across plans,
 anomalies, multi-material breakdowns. Investigates the pricing **data**, not
@@ -62,6 +67,10 @@ just a single record.
 Writes: `analysis_findings` (`summary`, `status: analyzed | bad_data`).
 No human-in-the-loop dependency — architecturally independent, which is why it
 is the clean **second worker** to build for real routing.
+
+**Built (Module 3):** three tools — `get_rejection_reason_counts`,
+`get_downstream_summary`, `list_plans`. They take no filters yet (period,
+region).
 
 ### `escalation` — human handoff (HITL)
 When the agent cannot resolve a request or detects an anomaly, it escalates to a

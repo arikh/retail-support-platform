@@ -9,11 +9,14 @@ Each entry: what happened, why, what changed, and the numbers.
 | INC-002 | Run ended but status still said `running` | 3 | Fixed |
 | INC-003 | Compound question only half answered | 3 | Fixed |
 | INC-004 | Model invented an answer for a plan that doesn't exist | 3 | Fixed |
-| INC-005 | Worker crashed when the model refused to fill the schema | 3 | Open (support fixed, analysis pending) |
+| INC-005 | Worker crashed when the model refused to fill the schema | 3 | Fixed |
 | INC-006 | Old question answered again in the same conversation | 3 | Fixed |
 | INC-007 | Groq rejected JSON mode together with tools | 3 | Fixed |
 | INC-008 | Model misspelled the findings tool name; retry did not help | 3 | Fixed |
 | INC-009 | Worker returned nothing and the supervisor silently ran it again | 3 | Fixed |
+| INC-010 | A correct finding about failures was labelled `bad_data` | 3 | Fixed |
+| INC-011 | Each worker got the whole question; two prompt fixes failed | 3 | Fixed |
+| INC-012 | Tool said a priced material was both priced and not priced | 3 | Fixed |
 
 ---
 
@@ -200,7 +203,7 @@ An agent without grounding will still fill every field.
 
 **Date:** 2026-10-01
 **Module:** 3 · Supervisor Topology & Worker Wrapping
-**Status:** Open (support fixed, analysis pending)
+**Status:** Fixed
 
 ### Symptom
 The compound question (plan P-100 status + Q3 rejection patterns) failed
@@ -230,22 +233,26 @@ at step 3 with `status: failed`. Before INC-001's fix, this would have
 looped to the max-steps limit.
 
 ### Fix
-Done for the support worker (2026-10-05):
-- It has a system prompt and real tools, so "no data" is an explicit result
-  (`not_found`), not a refusal.
+Both workers now work the same way (support on 2026-10-05, analysis on
+2026-10-06):
+- Each has a system prompt and real tools, so "no data" is an explicit result
+  (`not_found` for support, `bad_data` for analysis), not a refusal.
 - Findings are no longer requested as a forced tool call. The agent writes a
   plain text answer; a second call with no tools turns it into findings with
-  strict JSON output (see INC-008).
+  strict JSON output (see INC-008 and ADR-0012).
 - A failed agent run is tried once more, then reported as an error in state.
 
-Still open: the analysis worker is the old single call with no prompt and no
-tools. It gets the same treatment next.
+**Proof:** real runs. The unknown plan P-100 came back `not_found` in every
+run on 2026-10-05. The Q3 question came back `bad_data` in three runs on
+2026-10-06, with no invented numbers. `tests/test_workers.py` checks, without
+an LLM, that a failing agent or a failing formatting call becomes an error in
+state and never a crash.
 
 ### Before / after
 | Metric | Before | After |
 |---|---|---|
 | Support: result on "no data" | crash (`tool_use_failed`) or fabricated answer | `not_found` |
-| Analysis: result on "no data" | crash or fabricated answer | pending |
+| Analysis: result on "no data" | crash or fabricated answer | `bad_data` |
 | Steps to stop on worker error | 3 (errors rule worked) | 3 |
 
 ### Lesson
@@ -454,3 +461,156 @@ pending, and sent the question to it again.
 ### Lesson
 A step counter is also a detector. A right answer with an unexpected step
 count means hidden work.
+
+---
+
+## INC-010 · A correct finding about failures was labelled `bad_data`
+
+**Date:** 2026-10-06
+**Module:** 3 · Supervisor Topology & Worker Wrapping
+**Status:** Fixed
+
+### Symptom
+The analysis worker found the right plan, but the findings carried the wrong
+status. The count was also missing from the answer.
+
+Question: *"Which plans have downstream failures?"*
+
+```
+analysis_findings: summary='SPRING_LATAM_2024 has downstream failures.' status='bad_data'
+```
+
+### Cause
+The status is chosen by the formatting call, which reads the agent's text
+answer and a short status guide. The guide described `bad_data` as data that
+is "missing, not covered, or inconsistent". The answer contained the word
+"failures", and the call read bad news as bad data. Nothing in the guide
+separated the two.
+
+### Fix
+- The status guide now says that findings about problems (failures,
+  rejections) are `analyzed`, and that the status says whether the question
+  could be answered, not whether the news is good or bad.
+- The worker prompt now says to include the numbers from the tools.
+
+**Proof:** the same question came back `analyzed` with "2 failures" in the
+two real runs after the change (2026-10-06). There is no automated test for
+this: the label is chosen by an LLM.
+
+### Before / after
+| Metric | Before | After |
+|---|---|---|
+| Status for a finding about failures | `bad_data` | `analyzed` |
+| Count in the answer | missing | 2 failures |
+
+### Lesson
+When a model picks a label, it reads the words, not the intent. Define each
+label by what it means for the question, and say what it does not mean.
+
+---
+
+## INC-011 · Each worker got the whole question; two prompt fixes failed
+
+**Date:** 2026-10-06
+**Module:** 3 · Supervisor Topology & Worker Wrapping
+**Status:** Fixed
+
+### Symptom
+On a two-part question, the analysis worker also handled the part that
+belonged to the support worker. Two prompt changes gave two different
+failures.
+
+Question: *"What is the status of plan SUMMER_LATAM_V2? What are the most
+common rejection reasons across all plans?"*
+
+First run — the prompt said to ignore the other part. The worker answered it
+anyway, so the plan status appeared twice in the final answer:
+
+```
+analysis_findings: summary='Plan SUMMER_LATAM_V2 has status COMPLETED. Across all plans, the most common rejection reasons are: ...' status='analyzed'
+```
+
+Second run — the prompt said not to report a single plan's status. The worker
+refused out loud, and the formatting call labelled a valid analysis `bad_data`:
+
+```
+analysis_findings: summary='I’m unable to provide the status of plan SUMMER_LATAM_V2. Across all plans, the most common rejection reasons are: ...' status='bad_data'
+```
+
+### Cause
+Every planned worker received the user's whole message. This was the known
+limit recorded in ADR-0011. A prompt can ask a model to ignore part of its
+input, but it cannot remove that part.
+
+### Fix
+The planner now writes one question for each worker. `plan` changed from a
+list of worker names to a mapping of worker → its question. Each worker's
+agent receives the earlier conversation plus only its own question
+(`worker_messages` in `agent_runner.py`). The "ignore the other part" rules
+were deleted from both worker prompts.
+
+Routing is unchanged: the worker name is still a fixed choice checked by
+`route()`. The question text goes to the worker as input and never reaches a
+routing decision.
+
+**Proof:**
+- Real runs (2026-10-06): the same question, 2 of 2 runs — the plan held two
+  separate questions, the statuses were `resolved` and `analyzed`, and the
+  analysis answer held only the rejection reasons.
+- `tests/test_graph.py::test_two_part_question_gives_each_worker_its_own_part`
+  checks, without an LLM, that each worker receives only its own question.
+
+### Before / after
+| Metric | Before | After |
+|---|---|---|
+| Input to each worker | the whole message | its own question |
+| Plan status in the final answer | twice, or refused | once |
+| Analysis status on the two-part question | `analyzed` or `bad_data` | `analyzed` (2 of 2 runs) |
+| Rules in the worker prompts about the other part | 1 each | 0 |
+
+### Lesson
+If a model must not act on some text, do not show it that text. Two prompt
+changes failed in two different ways; removing the input fixed both.
+
+---
+
+## INC-012 · Tool said a priced material was both priced and not priced
+
+**Date:** 2026-10-06
+**Module:** 3 · Supervisor Topology & Worker Wrapping
+**Status:** Fixed
+
+### Symptom
+Found in code review, not in a run. For a material that was priced,
+`get_material_rejection_reason` returned two lines that contradict each other:
+
+```
+Material M-1001 (Winter Jacket XL) was successfully priced in plan 'SUMMER_LATAM_V2'.
+Material M-1001 (Winter Jacket XL) was NOT priced.
+Plan: SUMMER_LATAM_V2 | Reason: None | Expiry: 6 months
+```
+
+All 12 tool tests were green at the time.
+
+### Cause
+The tool was changed from "return on the first row" to "collect a line for
+every row". The "not priced" line was left outside an `else`, so it was added
+for every row, priced or not. The test for a priced material only checked that
+the words "successfully priced" were present. It did not check that the
+opposite words were absent.
+
+### Fix
+- The "not priced" line is now under `else`.
+- The test also asserts that "NOT priced" is not in the result
+  (`tests/test_support_tools.py::test_rejection_reason_priced_material`).
+
+### Before / after
+| Metric | Before | After |
+|---|---|---|
+| Lines for a priced material | 2, contradicting | 1 |
+| Test catches the contradiction | no | yes |
+
+### Lesson
+A test that only checks for the right words passes when the wrong words are
+there too. For an answer with two possible outcomes, assert the one you expect
+and assert the other is absent.
