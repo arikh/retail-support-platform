@@ -21,8 +21,8 @@ Those two logs are as much the point of this repo as the code.
 
 ## Status
 
-Modules 1 to 3 of 8 are built. "Built" here means: the code exists and a test
-covers it.
+Modules 1 to 3 of 8 are built, plus an MCP server over the support lookups.
+"Built" here means: the code exists and a test covers it.
 
 ### Built and tested
 
@@ -35,13 +35,16 @@ covers it.
 | Graph | Planned workers run together; one failing worker ends the run as `failed`; an off-topic question stops in one step | `tests/test_graph.py` |
 | Question lifecycle | Every question starts clean and its answer is written back to the conversation (ADR-0013) | `tests/test_graph.py` |
 | Workers | A tool-calling agent finds the facts, a second call formats the findings; failures become errors in state (ADR-0012) | `tests/test_workers.py`, `tests/test_agent_runner.py` |
-| Support tools | Plan status, missing materials, downstream status, rejection reason | `tests/test_support_tools.py` |
+| Support tools | Plan status, missing materials, downstream status, rejection reason. Plain functions, registered as agent tools | `tests/test_support_tools.py` |
 | Analysis tools | Rejection reasons across plans, downstream summary, plan list | `tests/test_analysis_tools.py` |
-| Data access | One read-only path to the pricing tables | `tests/test_db.py` |
+| Data access | One read-only path to the pricing tables; each process chooses its database user | `tests/test_db.py` |
+| MCP server | The same four support lookups as read-only MCP tools, running as their own database role (ADR-0014) | `tests/test_mcp_server.py` |
 | Model provider | Models are chosen by role behind one interface; Groq is the only provider | `tests/test_model_provider.py` |
 
 No test calls a real LLM. The graph, supervisor and worker tests use fakes.
-The tool, data-access and checkpointer tests need the local Postgres.
+The tool, data-access, checkpointer and MCP tests need the local Postgres.
+The MCP tests talk to the server through an in-memory client: no subprocess
+and no port.
 
 Behaviour with the real model is recorded as dated runs in `INCIDENTS.md`,
 not as automated tests.
@@ -58,6 +61,7 @@ not as automated tests.
 | Tracing, cost tracking, evaluation | Module 7 |
 | API layer, auth, deployment | Module 8 |
 | A second model provider | `ModelProvider` has the seam |
+| The agent as an MCP host; a deployed MCP server with sign-in | ADR-0014 (see its triggers) |
 
 ### Known limits
 
@@ -76,6 +80,14 @@ not as automated tests.
   meaning. Nothing in code checks that.
 - Everything is proven on one provider and one model
   (Groq, `openai/gpt-oss-120b`).
+- The MCP server has no sign-in and listens on `127.0.0.1` only. It is not
+  deployed. Over stdio it was tried in the MCP Inspector, and over HTTP with a
+  client script; those two transports have no automated test.
+- Only the MCP server uses the restricted database role. The agent's own path
+  still connects as the Postgres superuser `retail`, with read-only set per
+  connection in `db.py` (ADR-0014).
+- The limits of the MCP role (writes refused, `pii_vault` refused, 5-second
+  statement timeout) were checked by hand with `psql`, not by a test.
 
 ## How a question flows
 
@@ -107,7 +119,8 @@ END
 
 ## Run it
 
-You need Python 3.12, [`uv`](https://docs.astral.sh/uv/) and Docker.
+You need Python 3.12, [`uv`](https://docs.astral.sh/uv/) and Docker. The MCP
+Inspector also needs Node.js.
 
 ```bash
 uv sync
@@ -115,24 +128,35 @@ docker compose up -d
 ```
 
 Create a `.env` file in the repo root. The database user and password are the
-development values from `docker-compose.yml`:
+development values from `docker-compose.yml`. Choose your own password for the
+MCP role (letters and digits only, because it sits inside a URL):
 
 ```
 GROQ_API_KEY=your-key
 DATABASE_URL=postgresql://retail:retail_dev_pw@localhost:5432/retail_support?options=-csearch_path%3Dcheckpoints
 APP_DATABASE_URL=postgresql://retail:retail_dev_pw@localhost:5432/retail_support
+MCP_DATABASE_URL=postgresql://retail_mcp_ro:your-mcp-password@localhost:5432/retail_support
 ```
 
 `DATABASE_URL` is for the checkpoint tables, which live in their own schema.
-`APP_DATABASE_URL` is for the pricing tables.
+`APP_DATABASE_URL` is for the pricing tables. `MCP_DATABASE_URL` is the
+read-only role that the MCP server uses.
 
-Create the tables and load the sample data, then the checkpoint tables:
+Create the tables, the sample data and the MCP role, then the checkpoint
+tables:
 
 ```bash
 for f in sql/*.sql; do
   docker exec -i retail-postgres psql -U retail -d retail_support < "$f"
 done
 uv run python scripts/init_db.py
+```
+
+Set the password of the MCP role to the one you put in `.env`. It is typed
+here, not stored in a SQL file:
+
+```bash
+docker exec -it retail-postgres psql -U retail -d retail_support -c "\password retail_mcp_ro"
 ```
 
 Run the tests:
@@ -160,10 +184,38 @@ async def main():
 asyncio.run(main())
 ```
 
+## The MCP server
+
+The four support lookups are also offered as MCP tools, for hosts outside this
+codebase (ADR-0014). The agent does not use MCP; it calls the same functions
+in-process. There is one implementation, in `pricing_lookups.py`.
+
+Open the server in the MCP Inspector (stdio):
+
+```bash
+uv run mcp dev src/retail_support/mcp_server.py
+```
+
+Serve it over Streamable HTTP on this machine, at `http://127.0.0.1:8000/mcp`:
+
+```bash
+uv run mcp run src/retail_support/mcp_server.py --transport streamable-http
+```
+
+Two small clients show both transports:
+
+```bash
+uv run python scripts/try_mcp_stdio.py     # starts the server itself
+uv run python scripts/try_mcp_http.py      # needs the HTTP server running
+```
+
+The server has no sign-in. Do not expose it beyond this machine.
+
 ## Stack
 
 In use: Python 3.12 · LangGraph · LangChain (`create_agent`) · Pydantic ·
-PostgreSQL · psycopg · Groq · `uv` · `ruff` · `pytest`
+PostgreSQL · psycopg · Groq · MCP Python SDK (`mcp` 2.3) · `uv` · `ruff` ·
+`pytest`
 
 Planned: Redis · pgvector · FastAPI
 
@@ -178,14 +230,17 @@ Planned: Redis · pgvector · FastAPI
       support_worker.py     # support worker and its prompts
       analysis_worker.py    # analysis worker and its prompts
       agent_runner.py       # shared: run the agent, format the findings
-      support_tools.py      # 4 tools on the pricing tables
+      pricing_lookups.py    # the 4 support lookups as plain functions
+      support_tools.py      # registers the 4 lookups as agent tools
+      mcp_server.py         # registers the same 4 lookups as MCP tools
       analysis_tools.py     # 3 tools on the pricing tables
-      db.py                 # read-only data access
+      db.py                 # read-only data access; a process picks its database user
       checkpointer.py       # Postgres checkpointer
       model_provider.py     # models by role
       config.py             # step limits
-    sql/                    # table definitions and sample data, in order
+    sql/                    # tables, sample data and the MCP role, in order
     scripts/init_db.py      # creates the checkpoint tables
+    scripts/try_mcp_*.py    # small MCP clients: stdio and HTTP
     tests/                  # no test calls a real LLM
     docs/adr/               # architecture decision records
     docs/                   # domain and technical design
@@ -208,6 +263,7 @@ Planned: Redis · pgvector · FastAPI
 | 0011 | The supervisor plans one question per worker and runs them together |
 | 0012 | A worker finds facts with tools, then formats its findings in a second call |
 | 0013 | Each question is opened and closed by its own node |
+| 0014 | The agent keeps in-process tools; an MCP server offers the same lookups to outside hosts |
 
 ## Incident log
 
