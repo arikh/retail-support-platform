@@ -13,13 +13,23 @@ from psycopg.rows import dict_row
 # TODO(env): temporary — centralize at app entry point, strip from modules
 load_dotenv()
 
-APP_DATABASE_URL = os.environ["APP_DATABASE_URL"]
 
+_database_url: str | None = None
+
+def use_database_url(url: str) -> None:
+    """Choose the database URL for this process. Call once at start."""
+    global _database_url
+    _database_url = url
+
+
+def database_url() -> str:
+    """The URL this process chose, else the app URL from the environment."""
+    return _database_url or os.environ["APP_DATABASE_URL"]
 
 async def fetch_all(sql: str, params: tuple = ()) -> list[dict]:
     """Run one SELECT and return the rows as a list of dicts."""
     async with await psycopg.AsyncConnection.connect(
-        APP_DATABASE_URL, row_factory=dict_row
+        database_url(), row_factory=dict_row
     ) as conn:
         await conn.set_read_only(True)
         async with conn.cursor() as cur:
