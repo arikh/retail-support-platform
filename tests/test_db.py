@@ -1,8 +1,19 @@
+import os
+
 import psycopg
 import pytest
 
+from retail_support import db
 from retail_support.db import fetch_all
 
+
+async def test_use_database_url_switches_the_database_user(monkeypatch):
+    monkeypatch.setattr(db, "_database_url", None)  # pytest restores it after the test
+    db.use_database_url(os.environ["MCP_DATABASE_URL"])
+
+    rows = await db.fetch_all("select current_user")
+
+    assert rows == [{"current_user": "retail_mcp_ro"}]
 
 async def test_fetch_all_returns_rows_as_dicts():
     rows = await fetch_all(
