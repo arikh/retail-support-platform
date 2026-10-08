@@ -24,6 +24,9 @@ Those two logs are as much the point of this repo as the code.
 Modules 1 to 3 of 8 are built, plus an MCP server over the support lookups.
 "Built" here means: the code exists and a test covers it.
 
+Tracing can be switched on for a single run (see "Tracing"). It has no test,
+so it is not counted as built.
+
 ### Built and tested
 
 | Part | What it does | Tests |
@@ -58,7 +61,7 @@ not as automated tests.
 | Redis locks and cache | ADR-0005, ADR-0010 |
 | Rules-first worker choice and the fallback log | ADR-0004 (see its amendment) |
 | Retrieval over the FAQ and policy corpus | `docs/domain-and-requirements.md` |
-| Tracing, cost tracking, evaluation | Module 7 |
+| Tracing on every request with the content rule enforced in code; cost tracking; evaluation | Module 7; ADR-0015 for the content rule |
 | API layer, auth, deployment | Module 8 |
 | A second model provider | `ModelProvider` has the seam |
 | The agent as an MCP host; a deployed MCP server with sign-in | ADR-0014 (see its triggers) |
@@ -88,6 +91,11 @@ not as automated tests.
   connection in `db.py` (ADR-0014).
 - The limits of the MCP role (writes refused, `pii_vault` refused, 5-second
   statement timeout) were checked by hand with `psql`, not by a test.
+- Tracing is switched on by hand, one command at a time. It was tried in two
+  real runs; no test covers it. The rule about what may enter a trace
+  (ADR-0015) is a convention: nothing in code enforces it.
+- With the two hide switches on, a trace has no token counts. There is no
+  per-call log yet, so such a run has no token numbers anywhere.
 
 ## How a question flows
 
@@ -127,6 +135,9 @@ uv sync
 docker compose up -d
 ```
 
+Postgres is published on `127.0.0.1` only, so it cannot be reached from
+another machine.
+
 Create a `.env` file in the repo root. The database user and password are the
 development values from `docker-compose.yml`. Choose your own password for the
 MCP role (letters and digits only, because it sits inside a URL):
@@ -158,6 +169,10 @@ here, not stored in a SQL file:
 ```bash
 docker exec -it retail-postgres psql -U retail -d retail_support -c "\password retail_mcp_ro"
 ```
+
+Run the command as written: `retail_mcp_ro` is the name of the role, not the
+password. It asks for the new password twice, and nothing shows while you
+type.
 
 Run the tests:
 
@@ -211,11 +226,49 @@ uv run python scripts/try_mcp_http.py      # needs the HTTP server running
 
 The server has no sign-in. Do not expose it beyond this machine.
 
+## Tracing
+
+Tracing is optional and off by default. It needs no code change: LangGraph
+sends a trace to LangSmith, a hosted third-party service, when
+`LANGSMITH_TRACING` is true.
+
+Add a LangSmith API key to `.env`:
+
+```
+LANGSMITH_API_KEY=your-key
+LANGSMITH_PROJECT=retail-support-platform
+```
+
+Switch tracing on for one command, on the command line. Keep
+`LANGSMITH_TRACING` out of `.env`, so that the test suite does not send
+traces:
+
+```bash
+LANGSMITH_TRACING=true uv run try_graph.py
+```
+
+A trace holds the prompts, the question, the tool results and the answers,
+and all of it is stored on LangSmith's servers. Full traces are therefore for
+seed data and questions typed by a developer only (ADR-0015). For anything
+else, hide the content:
+
+```bash
+LANGSMITH_TRACING=true LANGSMITH_HIDE_INPUTS=true LANGSMITH_HIDE_OUTPUTS=true \
+  uv run try_graph.py
+```
+
+That keeps the tree and the latency. It drops the inputs, the outputs and
+the token counts.
+
+One traced run on 8 Oct 2026 (one question, so one sample): 4 model calls,
+2,404 tokens, 3.17 seconds. About 2.93 seconds were model time; the database
+lookup took 0.06 seconds.
+
 ## Stack
 
 In use: Python 3.12 · LangGraph · LangChain (`create_agent`) · Pydantic ·
 PostgreSQL · psycopg · Groq · MCP Python SDK (`mcp` 2.3) · `uv` · `ruff` ·
-`pytest`
+`pytest` · LangSmith (tracing, optional)
 
 Planned: Redis · pgvector · FastAPI
 
@@ -264,6 +317,7 @@ Planned: Redis · pgvector · FastAPI
 | 0012 | A worker finds facts with tools, then formats its findings in a second call |
 | 0013 | Each question is opened and closed by its own node |
 | 0014 | The agent keeps in-process tools; an MCP server offers the same lookups to outside hosts |
+| 0015 | Full-content traces for seed data only; tracing is off by default and switched on per command |
 
 ## Incident log
 
