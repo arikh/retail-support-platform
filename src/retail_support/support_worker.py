@@ -4,12 +4,7 @@ from langchain.agents import create_agent
 from retail_support.agent_runner import run_agent, to_findings, worker_messages
 from retail_support.model_provider import ModelProvider
 from retail_support.state import SupportFindings, SupportState
-from retail_support.support_tools import (
-    get_downstream_status,
-    get_material_rejection_reason,
-    get_missing_materials,
-    get_plan_status,
-)
+from retail_support.tool_source import support_tools
 
 SUPPORT_SYSTEM_PROMPT = """You are the support worker for a retail pricing-operations platform. You answer questions about ONE specific pricing plan or material, using only your tools.
 
@@ -33,14 +28,17 @@ SUPPORT_STATUS_GUIDE = """Status guide:
 
 async def support_worker(state: SupportState) -> dict:
     try:
-        agent = create_agent(
-            model = ModelProvider.get(role="support"),
-            tools=[get_downstream_status, get_material_rejection_reason, get_missing_materials, get_plan_status],
-            system_prompt=SUPPORT_SYSTEM_PROMPT,
-        )
+        async with support_tools() as tools:
+            agent = create_agent(
+                model=ModelProvider.get(role="support"),
+                tools=tools,
+                system_prompt=SUPPORT_SYSTEM_PROMPT,
+            )
+            answer = await run_agent(agent, worker_messages(state, "support"))
         
-        answer = await run_agent(agent, worker_messages(state, "support"))
-        findings = await to_findings("support", SupportFindings, SUPPORT_STATUS_GUIDE, answer)
+        findings = await to_findings(
+            "support", SupportFindings, SUPPORT_STATUS_GUIDE, answer
+        )
 
 
     except Exception as e:
