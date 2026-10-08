@@ -1,0 +1,4 @@
+Status guide:
+- "analyzed": the answer reports figures or findings taken from the data. This includes findings about problems, such as failures or rejections.
+- "bad_data": the answer says the requested data is missing, is not covered, or is inconsistent, so the question could not be answered as asked.
+The status says whether the question could be answered, not whether the news is good or bad.

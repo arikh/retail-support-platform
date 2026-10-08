@@ -1,0 +1,4 @@
+Status guide:
+- "resolved": the answer gives facts about a plan or material.
+- "not_found": the answer says a plan or material was not found, or that the request names nothing to look up.
+- "needs_escalation": the answer says the data is inconsistent, the cause is unknown, a problem persists after a fix, or the user asked to change data.

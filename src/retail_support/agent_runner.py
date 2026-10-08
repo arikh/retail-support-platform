@@ -2,12 +2,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from retail_support.config import WORKER_ATTEMPTS, WORKER_RECURSION_LIMIT
 from retail_support.model_provider import ModelProvider
+from retail_support.prompt_store import load_prompt
 
-FORMAT_PROMPT = """Turn the answer below into the required fields.
-- summary: the answer, unchanged in meaning. Do not add facts.
-- status: choose the one that matches the answer, using this guide.
-
-"""
+FORMAT_PROMPT = load_prompt("format_findings").text    
 
 async def run_agent(agent, messages: list):
     for _ in range(WORKER_ATTEMPTS):
