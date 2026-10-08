@@ -22,6 +22,8 @@ Those two logs are as much the point of this repo as the code.
 ## Status
 
 Modules 1 to 3 of 8 are built, plus an MCP server over the support lookups.
+The support worker can also act as an MCP host and load those lookups from
+the server; that path is off by default.
 "Built" here means: the code exists and a test covers it.
 
 Tracing can be switched on for a single run (see "Tracing"). It has no test,
@@ -42,12 +44,14 @@ so it is not counted as built.
 | Analysis tools | Rejection reasons across plans, downstream summary, plan list | `tests/test_analysis_tools.py` |
 | Data access | One read-only path to the pricing tables; each process chooses its database user | `tests/test_db.py` |
 | MCP server | The same four support lookups as read-only MCP tools, running as their own database role (ADR-0014) | `tests/test_mcp_server.py` |
+| MCP host | The support worker loads its four tools in-process (default) or from the MCP server over stdio, chosen by `SUPPORT_TOOL_SOURCE` (ADR-0014 amendment) | `tests/test_tool_source.py` |
 | Model provider | Models are chosen by role behind one interface; Groq is the only provider | `tests/test_model_provider.py` |
 
 No test calls a real LLM. The graph, supervisor and worker tests use fakes.
 The tool, data-access, checkpointer and MCP tests need the local Postgres.
-The MCP tests talk to the server through an in-memory client: no subprocess
-and no port.
+The MCP server tests talk to the server through an in-memory client: no
+subprocess and no port. One test in `tests/test_tool_source.py` starts the
+real server as a child process over stdio.
 
 Behaviour with the real model is recorded as dated runs in `INCIDENTS.md`,
 not as automated tests.
@@ -64,7 +68,7 @@ not as automated tests.
 | Tracing on every request with the content rule enforced in code; cost tracking; evaluation | Module 7; ADR-0015 for the content rule |
 | API layer, auth, deployment | Module 8 |
 | A second model provider | `ModelProvider` has the seam |
-| The agent as an MCP host; a deployed MCP server with sign-in | ADR-0014 (see its triggers) |
+| A deployed MCP server with sign-in; one MCP connection held for the life of the application | ADR-0014 (see its triggers and its amendment) |
 
 ### Known limits
 
@@ -84,8 +88,8 @@ not as automated tests.
 - Everything is proven on one provider and one model
   (Groq, `openai/gpt-oss-120b`).
 - The MCP server has no sign-in and listens on `127.0.0.1` only. It is not
-  deployed. Over stdio it was tried in the MCP Inspector, and over HTTP with a
-  client script; those two transports have no automated test.
+  deployed. Over HTTP it was tried with a client script only; that transport
+  has no automated test. Stdio has one (`tests/test_tool_source.py`).
 - Only the MCP server uses the restricted database role. The agent's own path
   still connects as the Postgres superuser `retail`, with read-only set per
   connection in `db.py` (ADR-0014).
@@ -96,6 +100,15 @@ not as automated tests.
   (ADR-0015) is a convention: nothing in code enforces it.
 - With the two hide switches on, a trace has no token counts. There is no
   per-call log yet, so such a run has no token numbers anywhere.
+- On the MCP host path, every support question opens a new connection and
+  starts the server as a new process: about 0.5 seconds each, measured once.
+  A production host would keep one connection open for the life of the
+  application; that needs an application entry point (Module 8).
+- A wrong `SUPPORT_TOOL_SOURCE` does not stop the program at start. Each
+  support question fails instead (`failed`, with the reason in `errors`), and
+  the user sees only "I could not answer this question."
+- The MCP host uses `langchain.mcp`, which is in beta and prints a warning
+  when it loads.
 
 ## How a question flows
 
@@ -202,8 +215,8 @@ asyncio.run(main())
 ## The MCP server
 
 The four support lookups are also offered as MCP tools, for hosts outside this
-codebase (ADR-0014). The agent does not use MCP; it calls the same functions
-in-process. There is one implementation, in `pricing_lookups.py`.
+codebase (ADR-0014). By default the agent does not use MCP; it calls the same
+functions in-process. There is one implementation, in `pricing_lookups.py`.
 
 Open the server in the MCP Inspector (stdio):
 
@@ -225,6 +238,17 @@ uv run python scripts/try_mcp_http.py      # needs the HTTP server running
 ```
 
 The server has no sign-in. Do not expose it beyond this machine.
+
+The support worker can also load its tools from this server, as an MCP host.
+It starts the server itself over stdio, so no server needs to be running:
+
+```bash
+SUPPORT_TOOL_SOURCE=mcp uv run try_graph.py
+```
+
+The allowed values are `in_process` (the default) and `mcp`.
+`scripts/try_mcp_host.py` loads the tools through the host library and times
+one call and the whole connection.
 
 ## Tracing
 
@@ -267,8 +291,8 @@ lookup took 0.06 seconds.
 ## Stack
 
 In use: Python 3.12 · LangGraph · LangChain (`create_agent`) · Pydantic ·
-PostgreSQL · psycopg · Groq · MCP Python SDK (`mcp` 2.3) · `uv` · `ruff` ·
-`pytest` · LangSmith (tracing, optional)
+PostgreSQL · psycopg · Groq · MCP Python SDK (`mcp` 2.3) · `langchain.mcp` (MCP host, beta) ·
+`uv` · `ruff` · `pytest` · LangSmith (tracing, optional)
 
 Planned: Redis · pgvector · FastAPI
 
@@ -286,14 +310,15 @@ Planned: Redis · pgvector · FastAPI
       pricing_lookups.py    # the 4 support lookups as plain functions
       support_tools.py      # registers the 4 lookups as agent tools
       mcp_server.py         # registers the same 4 lookups as MCP tools
+      tool_source.py        # support tools: in-process or from the MCP server
       analysis_tools.py     # 3 tools on the pricing tables
       db.py                 # read-only data access; a process picks its database user
       checkpointer.py       # Postgres checkpointer
       model_provider.py     # models by role
-      config.py             # step limits
+      config.py             # step limits; allowed tool sources
     sql/                    # tables, sample data and the MCP role, in order
     scripts/init_db.py      # creates the checkpoint tables
-    scripts/try_mcp_*.py    # small MCP clients: stdio and HTTP
+    scripts/try_mcp_*.py    # small MCP clients: stdio, HTTP and the host library
     tests/                  # no test calls a real LLM
     docs/adr/               # architecture decision records
     docs/                   # domain and technical design
@@ -316,7 +341,7 @@ Planned: Redis · pgvector · FastAPI
 | 0011 | The supervisor plans one question per worker and runs them together |
 | 0012 | A worker finds facts with tools, then formats its findings in a second call |
 | 0013 | Each question is opened and closed by its own node |
-| 0014 | The agent keeps in-process tools; an MCP server offers the same lookups to outside hosts |
+| 0014 | The agent keeps in-process tools; an MCP server offers the same lookups to outside hosts (amended 8 Oct: the agent can also be an MCP host, off by default) |
 | 0015 | Full-content traces for seed data only; tracing is off by default and switched on per command |
 
 ## Incident log
