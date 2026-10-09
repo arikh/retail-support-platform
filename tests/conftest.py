@@ -17,12 +17,14 @@ class FakePlanner:
         self.plans = list(plans)
         self.error = error
         self.seen = []  # the messages of each call, in order
+        self.configs = []  # the config of each call, in order
 
     def with_structured_output(self, schema):
         return self
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, config=None):
         self.seen.append(messages)
+        self.configs.append(config)
         if self.error is not None:
             raise self.error
         tasks = self.plans[len(self.seen) - 1]

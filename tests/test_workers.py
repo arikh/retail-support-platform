@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage
 
 import retail_support.analysis_worker as analysis_module
 import retail_support.support_worker as support_module
+from retail_support.prompt_store import call_metadata, load_prompt
 from retail_support.state import AnalysisFindings, SupportFindings
 
 WORKERS = [
@@ -48,12 +49,14 @@ def state_for(name):
 async def test_worker_returns_findings(monkeypatch, worker, module, name, findings):
     seen = {}
 
-    async def run_agent(agent, messages):
+    async def run_agent(agent, messages, metadata):
         seen["question"] = messages[-1].content
+        seen["metadata"] = metadata
         return "the answer"
 
     async def to_findings(role, schema, status_guide, answer):
         seen["role"] = role
+        seen["guide"] = status_guide
         seen["answer"] = answer
         return findings
 
@@ -62,14 +65,20 @@ async def test_worker_returns_findings(monkeypatch, worker, module, name, findin
     result = await worker(state_for(name))
 
     assert result == {f"{name}_findings": findings, "step_count": 1}
-    assert seen == {"question": "my part", "role": name, "answer": "the answer"}
+    assert seen == {
+        "question": "my part",
+        "metadata": call_metadata(name, load_prompt(f"{name}_system")),
+        "role": name,
+        "guide": load_prompt(f"{name}_status_guide"),
+        "answer": "the answer",
+    }
 
 
 @pytest.mark.parametrize("worker, module, name, findings", WORKERS)
 async def test_agent_failure_becomes_an_error(
     monkeypatch, worker, module, name, findings
 ):
-    async def run_agent(agent, messages):
+    async def run_agent(agent, messages, metadata):
         raise RuntimeError("boom")
 
     async def to_findings(role, schema, status_guide, answer):
@@ -86,7 +95,7 @@ async def test_agent_failure_becomes_an_error(
 async def test_formatting_failure_becomes_an_error(
     monkeypatch, worker, module, name, findings
 ):
-    async def run_agent(agent, messages):
+    async def run_agent(agent, messages, metadata):
         return "the answer"
 
     async def to_findings(role, schema, status_guide, answer):

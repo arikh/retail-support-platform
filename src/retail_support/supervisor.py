@@ -6,42 +6,10 @@ from pydantic import BaseModel
 
 from retail_support.config import MAX_STEPS
 from retail_support.model_provider import ModelProvider
+from retail_support.prompt_store import call_metadata, load_prompt
 from retail_support.state import FINDINGS_FIELD, SupportState
 
-ROUTING_SYSTEM_PROMPT = """
-You are a routing planner for a retail pricing-operations support platform. 
-This platform generates country-specific retail prices for a retailer's materials (products) from submitted pricing plans. 
-You do NOT answer the user's question — you decide which specialist workers should handle it, and what each one should be asked.
-
-Choose "support" when the request is about ONE specific pricing plan or material:
-- the status of a named plan
-- why a specific material was rejected or excluded
-- which materials are missing from a named plan
-- whether a named plan's prices propagated downstream
-These are answered by a single lookup on one plan or material.
-
-Choose "analysis" when the request is about PATTERNS ACROSS MANY plans, materials, countries, or time:
-- most common rejection reasons across plans
-- pricing trends or comparisons over time or across countries
-- anomalies or spikes in rejections or failures
-- aggregate breakdowns across the dataset
-These require investigating data broadly, not a single lookup.
-
-Return one task for every worker the request needs. Each task has a worker and a question.
-- If the request names one specific plan or material, include a "support" task.
-- If it asks about trends, patterns, comparisons, or anomalies across many, include an "analysis" task.
-- If the request has both kinds of parts, return both tasks.
-- At most one task per worker.
-
-How to write each question:
-- It contains only the part of the request that belongs to that worker.
-- Use the user's own words. Do not add anything the user did not ask.
-- Copy plan names and material IDs exactly as the user wrote them.
-- It must make sense when read alone. If the user says "that plan" or "it", replace it with the actual name from the conversation.
-- If the whole request is for one worker, the question is the user's message, unchanged.
-
-If the request fits neither worker, or you are genuinely unsure, return an empty list of tasks. Do not guess.
-Plan only for the latest user message. Earlier messages and answers are context only."""
+ROUTING_SYSTEM_PROMPT = load_prompt("routing_system")
 
 class WorkerTask(BaseModel):
     worker: Literal["support", "analysis"]
@@ -92,8 +60,11 @@ async def supervisor(state: SupportState) -> dict:
         try:
             llm = ModelProvider.get(role="supervisor")
             classifier = llm.with_structured_output(RoutingPlan)
-            messages = [SystemMessage(content=ROUTING_SYSTEM_PROMPT), *state["messages"]]
-            decision = await classifier.ainvoke(messages)
+            messages = [SystemMessage(content=ROUTING_SYSTEM_PROMPT.text), *state["messages"]]
+            decision = await classifier.ainvoke(
+                messages,
+                config={"metadata": call_metadata("supervisor", ROUTING_SYSTEM_PROMPT)},
+            )
         except Exception as e:
             return {
                 "next": [],
@@ -127,4 +98,3 @@ async def supervisor(state: SupportState) -> dict:
         "next": pending_workers(state, plan),
         "step_count": 1,
     }
-    
