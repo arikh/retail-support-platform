@@ -1,0 +1,4 @@
+Status guide:
+- "resolved": the answer gives facts about a plan or material, or explains a term, status, rule or process from the policy texts.
+- "not_found": the answer says a plan or material was not found, that the request names nothing to look up, or that the policy texts do not cover the question.
+- "needs_escalation": the answer says the data is inconsistent, the cause is unknown, a problem persists after a fix, or the user asked to change data.

@@ -1,12 +1,14 @@
 """Prompts live in versioned files and are loaded by name (Piece 4, step 1)."""
 
 import dataclasses
+import re
 
 import pytest
 
 from retail_support import agent_runner, analysis_worker, supervisor, support_worker
 from retail_support.prompt_store import (
     ACTIVE_VERSIONS,
+    PROMPTS_DIR,
     Prompt,
     call_metadata,
     load_prompt,
@@ -19,6 +21,16 @@ def test_every_active_prompt_loads(name):
 
     assert prompt == Prompt(name=name, version=ACTIVE_VERSIONS[name], text=prompt.text)
     assert prompt.text.strip()
+
+
+@pytest.mark.parametrize("name", sorted(ACTIVE_VERSIONS))
+def test_every_earlier_version_is_kept(name):
+    # Governance: a rollback needs the old file, and old log rows name it.
+    live = ACTIVE_VERSIONS[name]
+    assert re.fullmatch(r"v[1-9][0-9]*", live)
+
+    for number in range(1, int(live[1:]) + 1):
+        assert (PROMPTS_DIR / f"{name}.v{number}.txt").is_file()
 
 
 def test_unknown_prompt_raises_and_names_it():
