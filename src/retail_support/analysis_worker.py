@@ -8,20 +8,24 @@ from retail_support.analysis_tools import (
     list_plans,
 )
 from retail_support.model_provider import ModelProvider
-from retail_support.prompt_store import load_prompt
+from retail_support.prompt_store import call_metadata, load_prompt
 from retail_support.state import AnalysisFindings, SupportState
 
-ANALYSIS_SYSTEM_PROMPT = load_prompt("analysis_system").text
-ANALYSIS_STATUS_GUIDE = load_prompt("analysis_status_guide").text
+ANALYSIS_SYSTEM_PROMPT = load_prompt("analysis_system")
+ANALYSIS_STATUS_GUIDE = load_prompt("analysis_status_guide")
 
 async def analysis_worker(state: SupportState) -> dict:
     try:
         agent = create_agent(
             model = ModelProvider.get(role="analysis"),
             tools = [get_rejection_reason_counts, get_downstream_summary, list_plans],
-            system_prompt = ANALYSIS_SYSTEM_PROMPT,
+            system_prompt = ANALYSIS_SYSTEM_PROMPT.text,
         )
-        analysis = await run_agent(agent, worker_messages(state, "analysis"))
+        analysis = await run_agent(
+            agent,
+            worker_messages(state, "analysis"),
+            call_metadata("analysis", ANALYSIS_SYSTEM_PROMPT),
+        )
         findings = await to_findings("analysis", AnalysisFindings, ANALYSIS_STATUS_GUIDE, analysis)
     
     except Exception as e:

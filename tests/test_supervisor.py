@@ -3,6 +3,7 @@ from langgraph.graph import END, START, StateGraph
 
 from retail_support.config import MAX_STEPS
 from retail_support.finish_question import FAILED_ANSWER, finish_question
+from retail_support.prompt_store import call_metadata, load_prompt
 from retail_support.state import AnalysisFindings, SupportFindings, SupportState
 from retail_support.supervisor import route, supervisor
 
@@ -163,3 +164,13 @@ def test_route_lets_only_known_workers_through():
     assert route({"next": ["support", "escalation", "rm -rf"]}) == ["support"]
     assert route({"next": ["escalation"]}) == "finish_question"
     assert route({"next": []}) == "finish_question"
+
+
+async def test_planner_call_names_its_node_and_prompt(use_planner):
+    planner = use_planner([("support", "q")])
+
+    await supervisor(new_state())
+
+    assert planner.configs == [
+        {"metadata": call_metadata("supervisor", load_prompt("routing_system"))}
+    ]

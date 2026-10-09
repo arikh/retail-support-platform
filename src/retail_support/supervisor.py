@@ -6,10 +6,10 @@ from pydantic import BaseModel
 
 from retail_support.config import MAX_STEPS
 from retail_support.model_provider import ModelProvider
-from retail_support.prompt_store import load_prompt
+from retail_support.prompt_store import call_metadata, load_prompt
 from retail_support.state import FINDINGS_FIELD, SupportState
 
-ROUTING_SYSTEM_PROMPT = load_prompt("routing_system").text
+ROUTING_SYSTEM_PROMPT = load_prompt("routing_system")
 
 class WorkerTask(BaseModel):
     worker: Literal["support", "analysis"]
@@ -60,8 +60,11 @@ async def supervisor(state: SupportState) -> dict:
         try:
             llm = ModelProvider.get(role="supervisor")
             classifier = llm.with_structured_output(RoutingPlan)
-            messages = [SystemMessage(content=ROUTING_SYSTEM_PROMPT), *state["messages"]]
-            decision = await classifier.ainvoke(messages)
+            messages = [SystemMessage(content=ROUTING_SYSTEM_PROMPT.text), *state["messages"]]
+            decision = await classifier.ainvoke(
+                messages,
+                config={"metadata": call_metadata("supervisor", ROUTING_SYSTEM_PROMPT)},
+            )
         except Exception as e:
             return {
                 "next": [],
@@ -95,4 +98,3 @@ async def supervisor(state: SupportState) -> dict:
         "next": pending_workers(state, plan),
         "step_count": 1,
     }
-    

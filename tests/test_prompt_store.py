@@ -5,7 +5,12 @@ import dataclasses
 import pytest
 
 from retail_support import agent_runner, analysis_worker, supervisor, support_worker
-from retail_support.prompt_store import ACTIVE_VERSIONS, Prompt, load_prompt
+from retail_support.prompt_store import (
+    ACTIVE_VERSIONS,
+    Prompt,
+    call_metadata,
+    load_prompt,
+)
 
 
 @pytest.mark.parametrize("name", sorted(ACTIVE_VERSIONS))
@@ -38,17 +43,40 @@ def test_format_prompt_keeps_its_trailing_newlines():
 
 
 def test_the_code_uses_the_loaded_prompts():
-    assert supervisor.ROUTING_SYSTEM_PROMPT == load_prompt("routing_system").text
-    assert support_worker.SUPPORT_SYSTEM_PROMPT == load_prompt("support_system").text
-    assert (
-        support_worker.SUPPORT_STATUS_GUIDE
-        == load_prompt("support_status_guide").text
+    # Each constant holds the whole Prompt (name, version, text), not only
+    # the text, so a model call can say which prompt and version it used.
+    assert supervisor.ROUTING_SYSTEM_PROMPT is load_prompt("routing_system")
+    assert support_worker.SUPPORT_SYSTEM_PROMPT is load_prompt("support_system")
+    assert support_worker.SUPPORT_STATUS_GUIDE is load_prompt(
+        "support_status_guide"
     )
-    assert (
-        analysis_worker.ANALYSIS_SYSTEM_PROMPT == load_prompt("analysis_system").text
+    assert analysis_worker.ANALYSIS_SYSTEM_PROMPT is load_prompt(
+        "analysis_system"
     )
-    assert (
-        analysis_worker.ANALYSIS_STATUS_GUIDE
-        == load_prompt("analysis_status_guide").text
+    assert analysis_worker.ANALYSIS_STATUS_GUIDE is load_prompt(
+        "analysis_status_guide"
     )
-    assert agent_runner.FORMAT_PROMPT == load_prompt("format_findings").text
+    assert agent_runner.FORMAT_PROMPT is load_prompt("format_findings")
+
+
+# --- call_metadata: what a model call says about itself ---------------------
+
+
+def test_call_metadata_for_one_prompt():
+    prompt = Prompt(name="support_system", version="v1", text="...")
+
+    assert call_metadata("support", prompt) == {
+        "node": "support",
+        "prompts": {"support_system": "v1"},
+    }
+
+
+def test_call_metadata_keeps_each_prompt_with_its_own_version():
+    # The formatting call uses two prompt files; both versions must show.
+    first = Prompt(name="format_findings", version="v1", text="...")
+    second = Prompt(name="support_status_guide", version="v2", text="...")
+
+    assert call_metadata("support", first, second) == {
+        "node": "support",
+        "prompts": {"format_findings": "v1", "support_status_guide": "v2"},
+    }

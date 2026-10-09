@@ -28,4 +28,14 @@ def load_prompt(name: str) -> Prompt:
     text = (PROMPTS_DIR / f"{name}.{version}.txt").read_text(encoding="utf-8")
     return Prompt(name=name, version=version, text=text)
 
-            
+
+def call_metadata(node: str, *prompts: Prompt) -> dict[str, str]:
+    """What one model call says about itself; LLMCallLogger reads these keys.
+
+    prompts maps each prompt's name to its version, so a call built from
+    two prompt files names both.
+    """
+    return {
+        "node": node,
+        "prompts": {prompt.name: prompt.version for prompt in prompts},
+    }
