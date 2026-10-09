@@ -1,7 +1,7 @@
 # ADR-0015: What May Enter a Trace — Full Content for Seed Data Only
 
 ## Status
-Accepted
+Accepted. Amended 9 Oct 2026 (see the end).
 
 ## Context
 
@@ -109,3 +109,19 @@ This ADR is revisited when any of these happens:
 - LangSmith docs — "Trace LangGraph applications"
 - LangSmith docs — "Prevent logging of sensitive data in traces"
 - Build plan — stretch item "Tracing"; Piece 4 (per-call log)
+
+## Amendment — 9 Oct 2026: the per-call log exists
+
+The decision above stands. One of its triggers has fired: the per-call log is built
+(ADR-0016). Token counts, latency and cost of every model call are now written to the
+table llm_calls in our own database. The table holds no prompt text and no answer text.
+
+Two sentences above are now out of date: "Not built: the per-call log", and "Until it
+exists, a run with the hide switches has no token numbers anywhere".
+
+Each model call now also carries two pieces of metadata, its node and its prompt names
+with their versions. They are names written in our code, not by users, like the run names
+in the known gaps above.
+
+Not shown by a run: a run with both hide switches set and the logger attached, and
+whether the hide switches hide that metadata in a trace.

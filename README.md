@@ -26,6 +26,9 @@ The support worker can also act as an MCP host and load those lookups from
 the server; that path is off by default.
 "Built" here means: the code exists and a test covers it.
 
+Prompts are versioned files, and every model call can be logged with its
+tokens, latency, cost and prompt versions (see "The per-call log").
+
 Tracing can be switched on for a single run (see "Tracing"). It has no test,
 so it is not counted as built.
 
@@ -46,9 +49,12 @@ so it is not counted as built.
 | MCP server | The same four support lookups as read-only MCP tools, running as their own database role (ADR-0014) | `tests/test_mcp_server.py` |
 | MCP host | The support worker loads its four tools in-process (default) or from the MCP server over stdio, chosen by `SUPPORT_TOOL_SOURCE` (ADR-0014 amendment) | `tests/test_tool_source.py` |
 | Model provider | Models are chosen by role behind one interface; Groq is the only provider | `tests/test_model_provider.py` |
+| Prompt store | Six prompts as versioned files, loaded by name; one dict says which version is live (ADR-0016) | `tests/test_prompt_store.py` |
+| Per-call log | One row for each model call: node, model, prompt versions, tokens, latency, cost. Written by a callback that cannot break the answer (ADR-0016) | `tests/test_llm_call_logger.py`, `tests/test_llm_log.py` |
 
 No test calls a real LLM. The graph, supervisor and worker tests use fakes.
-The tool, data-access, checkpointer and MCP tests need the local Postgres.
+The tool, data-access, checkpointer, MCP and per-call-log tests need the
+local Postgres.
 The MCP server tests talk to the server through an in-memory client: no
 subprocess and no port. One test in `tests/test_tool_source.py` starts the
 real server as a child process over stdio.
@@ -65,7 +71,8 @@ not as automated tests.
 | Redis locks and cache | ADR-0005, ADR-0010 |
 | Rules-first worker choice and the fallback log | ADR-0004 (see its amendment) |
 | Retrieval over the FAQ and policy corpus | `docs/domain-and-requirements.md` |
-| Tracing on every request with the content rule enforced in code; cost tracking; evaluation | Module 7; ADR-0015 for the content rule |
+| Tracing on every request with the content rule enforced in code; the per-call log attached to every request; token budgets; evaluation | Module 7; ADR-0015 for the content rule; ADR-0016 for the log |
+| A second version of a prompt, with the before-and-after comparison | `PROMPT_GOVERNANCE.md` |
 | API layer, auth, deployment | Module 8 |
 | A second model provider | `ModelProvider` has the seam |
 | A deployed MCP server with sign-in; one MCP connection held for the life of the application | ADR-0014 (see its triggers and its amendment) |
@@ -98,8 +105,15 @@ not as automated tests.
 - Tracing is switched on by hand, one command at a time. It was tried in two
   real runs; no test covers it. The rule about what may enter a trace
   (ADR-0015) is a convention: nothing in code enforces it.
-- With the two hide switches on, a trace has no token counts. There is no
-  per-call log yet, so such a run has no token numbers anywhere.
+- With the two hide switches on, a trace has no token counts. The per-call
+  log is there to supply them, but the two have not been run together.
+- The per-call log is written only when the caller attaches the logger. No
+  entry point does that; it was done by hand, in two runs of one question.
+- A model with no entry in the price table writes no row to the per-call log,
+  and a model call that fails writes none either.
+- Only version 1 of each prompt exists. No two versions have been compared,
+  and no rollback has been done. The rules in `PROMPT_GOVERNANCE.md` are
+  mostly conventions; nothing stops an edit to a merged prompt file.
 - On the MCP host path, every support question opens a new connection and
   starts the server as a new process: about 0.5 seconds each, measured once.
   A production host would keep one connection open for the life of the
@@ -288,6 +302,43 @@ One traced run on 8 Oct 2026 (one question, so one sample): 4 model calls,
 2,404 tokens, 3.17 seconds. About 2.93 seconds were model time; the database
 lookup took 0.06 seconds.
 
+## The per-call log
+
+Every model call can write one row to the table `llm_calls`: which node made
+the call, the model, the prompts and their versions, the tokens, the latency
+and the cost (ADR-0016). The row holds no prompt text and no answer text.
+
+The log is written by a callback. Attach it in the config of the graph call:
+
+```python
+from retail_support.llm_call_logger import LLMCallLogger
+
+config = {
+    "callbacks": [LLMCallLogger()],
+    "configurable": {"thread_id": "try-1"},
+}
+result = await graph.ainvoke({"messages": [HumanMessage(question)]}, config=config)
+```
+
+Cost by agent and by prompt set:
+
+```bash
+docker exec -i retail-postgres psql -U retail -d retail_support -P pager=off -c \
+  "SELECT node, prompts, count(*) AS calls, sum(cost_usd) AS cost_usd
+   FROM llm_calls GROUP BY node, prompts ORDER BY cost_usd DESC;"
+```
+
+Two logged runs on 9 Oct 2026 (the same question, so two samples): 4 rows
+each, 2,044 input and 304 output tokens, $0.000489 for the question. The
+supervisor's one call was 30% of the cost; the support worker's three calls
+were 70%.
+
+The prices are in `llm_prices.py`, with the date they were checked. A logging
+failure is written to the Python log and never stops the answer.
+
+How a prompt is changed, rolled back and audited is in
+[`PROMPT_GOVERNANCE.md`](PROMPT_GOVERNANCE.md).
+
 ## Stack
 
 In use: Python 3.12 · LangGraph · LangChain (`create_agent`) · Pydantic ·
@@ -304,8 +355,8 @@ Planned: Redis · pgvector · FastAPI
       supervisor.py         # planner, stop rules, route()
       start_question.py     # opens a question (reset)
       finish_question.py    # closes a question (answer)
-      support_worker.py     # support worker and its prompts
-      analysis_worker.py    # analysis worker and its prompts
+      support_worker.py     # support worker
+      analysis_worker.py    # analysis worker
       agent_runner.py       # shared: run the agent, format the findings
       pricing_lookups.py    # the 4 support lookups as plain functions
       support_tools.py      # registers the 4 lookups as agent tools
@@ -315,14 +366,20 @@ Planned: Redis · pgvector · FastAPI
       db.py                 # read-only data access; a process picks its database user
       checkpointer.py       # Postgres checkpointer
       model_provider.py     # models by role
+      prompts/              # the prompts, one file for each version
+      prompt_store.py       # loads a prompt by name; which version is live
+      llm_call_logger.py    # callback: one log row for each model call
+      llm_log.py            # writes the row to llm_calls
+      llm_prices.py         # price table and the cost of a call
       config.py             # step limits; allowed tool sources
-    sql/                    # tables, sample data and the MCP role, in order
+    sql/                    # tables, sample data, the MCP role and the call log, in order
     scripts/init_db.py      # creates the checkpoint tables
     scripts/try_mcp_*.py    # small MCP clients: stdio, HTTP and the host library
     tests/                  # no test calls a real LLM
     docs/adr/               # architecture decision records
     docs/                   # domain and technical design
     INCIDENTS.md            # real bugs: symptom, cause, fix, numbers
+    PROMPT_GOVERNANCE.md    # how a prompt is owned, changed and audited
 
 ## Decision log
 
@@ -342,7 +399,8 @@ Planned: Redis · pgvector · FastAPI
 | 0012 | A worker finds facts with tools, then formats its findings in a second call |
 | 0013 | Each question is opened and closed by its own node |
 | 0014 | The agent keeps in-process tools; an MCP server offers the same lookups to outside hosts (amended 8 Oct: the agent can also be an MCP host, off by default) |
-| 0015 | Full-content traces for seed data only; tracing is off by default and switched on per command |
+| 0015 | Full-content traces for seed data only; tracing is off by default and switched on per command (amended 9 Oct: the per-call log now exists) |
+| 0016 | Every model call is logged with its cost and its prompt versions; prompts are versioned files |
 
 ## Incident log
 
