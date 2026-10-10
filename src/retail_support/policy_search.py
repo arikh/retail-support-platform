@@ -10,8 +10,10 @@ import asyncio
 
 from retail_support.db import fetch_all
 from retail_support.embedder import EMBEDDING_MODEL, embed_query, vector_literal
+from retail_support.rank_fusion import fuse
 
 DEFAULT_LIMIT = 3
+CANDIDATES = 10
 NOTHING_LOADED = "No policy passages are loaded."
 
 NEAREST_PASSAGES = """
@@ -48,6 +50,10 @@ async def keyword_passages(question: str, limit: int = DEFAULT_LIMIT) -> list[di
         KEYWORD_PASSAGES, (question, limit)
     )  
 
+async def hybrid_passages(question: str, limit: int = DEFAULT_LIMIT) -> list[dict]:
+    dense = await search_passages(question, CANDIDATES)
+    keyword = await keyword_passages(question, CANDIDATES)
+    return fuse(dense, keyword, limit)
 
 
 async def search_policy(question: str) -> str:
