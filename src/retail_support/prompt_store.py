@@ -5,9 +5,9 @@ from pathlib import Path
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 ACTIVE_VERSIONS = {
-    "routing_system": "v1",
-    "support_system": "v1",
-    "support_status_guide": "v1",
+    "routing_system": "v2",
+    "support_system": "v2",
+    "support_status_guide": "v2",
     "analysis_system": "v1",
     "analysis_status_guide": "v1",
     "format_findings": "v1",

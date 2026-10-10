@@ -56,8 +56,9 @@ Writes: `support_findings` (`summary`, `status: resolved | not_found | needs_esc
 
 **Built (Module 3):** four tools on the Postgres pricing tables —
 `get_plan_status`, `get_missing_materials`, `get_downstream_status`,
-`get_material_rejection_reason`. **Not built:** `escalate` (Module 6) and
-retrieval over the FAQ/policy corpus.
+`get_material_rejection_reason`. **Built (ADR-0017):** `search_policy`,
+dense search over the FAQ/policy corpus. **Not built:** `escalate`
+(Module 6).
 
 ### `analysis` — deeper data investigation
 For questions a single tool lookup can't resolve: patterns across plans,

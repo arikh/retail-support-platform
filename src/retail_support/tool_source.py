@@ -8,6 +8,7 @@ from retail_support.support_tools import (
     get_material_rejection_reason,
     get_missing_materials,
     get_plan_status,
+    search_policy,
 )
 
 MCP_SERVERS = {
@@ -26,6 +27,10 @@ IN_PROCESS_TOOLS = [
     get_plan_status,
 ]
 
+# The policy search is always in-process. The MCP server offers the four
+# lookups only (ADR-0014), so on the MCP path the search is added here.
+POLICY_TOOLS = [search_policy]
+
 
 def support_tool_source() -> str:
     source = os.environ.get("SUPPORT_TOOL_SOURCE", DEFAULT_SUPPORT_TOOL_SOURCE)
@@ -38,7 +43,7 @@ async def support_tools() -> AsyncIterator[list]:
     if support_tool_source() == "mcp":
         from langchain.mcp import MCPAdapter
         async with MCPAdapter(MCP_SERVERS) as adapter:
-            yield await adapter.list_tools()
+            yield list(await adapter.list_tools()) + POLICY_TOOLS
     else:
-        yield IN_PROCESS_TOOLS
+        yield IN_PROCESS_TOOLS + POLICY_TOOLS
     

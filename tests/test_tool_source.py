@@ -13,6 +13,7 @@ SUPPORT_TOOL_NAMES = {
     "get_missing_materials",
     "get_downstream_status",
     "get_material_rejection_reason",
+    "search_policy",  # always in-process, on both paths
 }
 
 
@@ -32,14 +33,14 @@ def test_unknown_source_raises_and_names_the_value(monkeypatch):
         support_tool_source()
 
 
-async def test_in_process_gives_the_four_tools(monkeypatch):
+async def test_in_process_gives_the_lookups_and_the_policy_search(monkeypatch):
     monkeypatch.delenv("SUPPORT_TOOL_SOURCE", raising=False)
     async with support_tools() as tools:
         assert {tool.name for tool in tools} == SUPPORT_TOOL_NAMES
 
 
 @pytest.mark.filterwarnings("ignore:`langchain.mcp` is in beta")
-async def test_mcp_gives_the_same_four_tools_and_they_work(monkeypatch):
+async def test_mcp_gives_the_same_tool_names_and_they_work(monkeypatch):
     monkeypatch.setenv("SUPPORT_TOOL_SOURCE", "mcp")
     async with support_tools() as tools:
         assert {tool.name for tool in tools} == SUPPORT_TOOL_NAMES
