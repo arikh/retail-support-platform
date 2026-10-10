@@ -22,6 +22,16 @@ NEAREST_PASSAGES = """
     LIMIT %s
 """
 
+KEYWORD_PASSAGES = """
+    SELECT source, heading, content, ts_rank(content_tsv, query) AS score
+    FROM policy_passages,
+         (SELECT replace(plainto_tsquery('english', %s)::text, '&', '|')::tsquery
+                 AS query) AS q
+    WHERE content_tsv @@ query
+    ORDER BY score DESC, source, heading
+    LIMIT %s
+"""
+
 
 async def search_passages(question: str, limit: int = DEFAULT_LIMIT) -> list[dict]:
     """The `limit` passages nearest to the question, nearest first.
@@ -32,6 +42,12 @@ async def search_passages(question: str, limit: int = DEFAULT_LIMIT) -> list[dic
     return await fetch_all(
         NEAREST_PASSAGES, (vector_literal(vector), EMBEDDING_MODEL, limit)
     )
+
+async def keyword_passages(question: str, limit: int = DEFAULT_LIMIT) -> list[dict]:
+    return await fetch_all(
+        KEYWORD_PASSAGES, (question, limit)
+    )  
+
 
 
 async def search_policy(question: str) -> str:
