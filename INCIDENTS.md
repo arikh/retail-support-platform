@@ -17,6 +17,7 @@ Each entry: what happened, why, what changed, and the numbers.
 | INC-010 | A correct finding about failures was labelled `bad_data` | 3 | Fixed |
 | INC-011 | Each worker got the whole question; two prompt fixes failed | 3 | Fixed |
 | INC-012 | Tool said a priced material was both priced and not priced | 3 | Fixed |
+| INC-013 | RAGAS installed but could not be imported | Piece 3 | Removed |
 
 ---
 
@@ -614,3 +615,63 @@ opposite words were absent.
 A test that only checks for the right words passes when the wrong words are
 there too. For an answer with two possible outcomes, assert the one you expect
 and assert the other is absent.
+
+---
+
+## INC-013 · RAGAS installed but could not be imported
+
+**Date:** 2026-10-10
+**Module:** Piece 3 · Evaluation
+**Status:** Removed (not fixed)
+
+### Symptom
+RAGAS was added to score how well an answer is supported by its passages
+(faithfulness). `uv add --dev ragas` succeeded. The first import failed:
+
+```
+uv run python -c "import ragas; print(ragas.__version__)"
+  File ".../ragas/llms/base.py", line 12, in <module>
+    from langchain_community.chat_models.vertexai import ChatVertexAI
+ModuleNotFoundError: No module named 'langchain_community.chat_models.vertexai'
+```
+
+Installed versions: `ragas` 0.4.3, `langchain-community` 0.4.2.
+
+### Cause
+RAGAS imports a module from `langchain-community` at load time. The
+`langchain-community` version that fits this platform's LangChain 1.x no
+longer has that module. RAGAS declares no upper bound on the package, so the
+resolver accepted the pair. The resolver reads what a package declares; it does
+not run it.
+
+This is the same kind of failure as the MCP adapter on 8 Oct (ADR-0014
+amendment): a package that installs has only passed the resolver.
+
+### Fix
+None in this repository. RAGAS was removed the same day and the lock file was
+restored:
+
+```
+git checkout pyproject.toml uv.lock
+uv sync
+```
+
+Downgrading the platform's LangChain packages to suit an evaluation tool was
+rejected: the platform runs on them.
+
+The known way around it is a separate environment for evaluation. The platform
+writes question, answer and passages to a file, and RAGAS reads that file with
+its own, older LangChain. Not built here (ADR-0018).
+
+### Before / after
+| Metric | Before | After removal |
+|---|---|---|
+| `import ragas` | fails | not installed |
+| Test suite | not run with RAGAS installed | 168 passed |
+| Answer faithfulness scored | no | no |
+
+### Lesson
+Check that a new package can be imported before building on it, and run the
+test suite after every install. An evaluation tool with heavy dependencies
+belongs in its own environment, not in the environment of the system it
+evaluates.

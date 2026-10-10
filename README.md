@@ -59,6 +59,7 @@ so it is not counted as built.
 | Policy corpus | Three FAQ and policy files cut into 16 passages, one for each `## ` section (ADR-0017) | `tests/test_policy_corpus.py` |
 | Embedder | Text to vectors with an open-source model that runs on this machine (`BAAI/bge-small-en-v1.5`, 384 numbers) | `tests/test_embedder.py` |
 | Policy search | The passages and their vectors in Postgres (pgvector); the table is replaced as a whole from the files; a question returns its 3 nearest passages, each with its source (ADR-0017) | `tests/test_policy_search.py` |
+| Golden set | 20 fixed questions with their expected workers and passages. Three scoring functions and one runner give retrieval hit rate for dense, keyword and hybrid search, and routing accuracy (ADR-0018) | `tests/test_eval_metrics.py`, `tests/test_golden_set.py` |
 | Keyword and hybrid search | The same passages searched by their words (Postgres full-text search), and the two result lists merged by position (reciprocal rank fusion). Built as functions; the worker's tool still uses dense search (ADR-0017 amendment) | `tests/test_keyword_search.py`, `tests/test_rank_fusion.py`, `tests/test_hybrid_search.py` |
 
 No test calls a real LLM. The graph, supervisor and worker tests use fakes.
@@ -82,7 +83,8 @@ not as automated tests.
 | PII tokenization and erasure (the vault table exists; no code uses it) | ADR-0006 |
 | Redis locks and cache | ADR-0005, ADR-0010 |
 | Rules-first worker choice and the fallback log | ADR-0004 (see its amendment) |
-| The worker's policy tool on hybrid search; a reranker; a fixed set of questions (golden dataset) to measure each stage | ADR-0017 (see its amendment) |
+| The worker's policy tool on hybrid search; a reranker | ADR-0017 (see its amendment) |
+| A score for the text of an answer (faithfulness, correctness); the golden set run on every pull request; a new routing prompt for requests for an action | ADR-0018 (see "Not built") |
 | Tracing on every request with the content rule enforced in code; the per-call log attached to every request; token budgets; evaluation | Module 7; ADR-0015 for the content rule; ADR-0016 for the log |
 | A comparison of two prompt versions on a fixed set of questions; a rollback | `PROMPT_GOVERNANCE.md` |
 | API layer, auth, deployment | Module 8 |
@@ -128,9 +130,15 @@ not as automated tests.
   done. The rules in `PROMPT_GOVERNANCE.md` are mostly conventions; nothing
   stops an edit to a merged prompt file.
 - The worker's policy tool uses dense search only, over 16 passages.
-  Keyword and hybrid search exist and are tested, but on four questions
-  typed by hand hybrid put the same passage first as dense every time. No
-  golden dataset and no hit rate exist to say which is better.
+  Keyword and hybrid search exist and are tested. On the golden set's 9
+  policy questions dense put the right passage first 8 times, hybrid 7 times
+  and keyword 6 times, so the tool stays on dense.
+- The golden set has 20 cases, and its results are one run each. Routing
+  accuracy was 17 of 20: two requests for an action were refused by the
+  planner itself, and one case needs the escalation worker, which is not
+  built.
+- The text of an answer is not scored. RAGAS could not be imported next to
+  the platform's LangChain packages and was removed (INC-013).
 - The policy search always returns three passages, also for a question the
   texts do not cover. Whether they answer the question is left to the model.
 - An answer from the policy texts names its source because the prompt asks
@@ -446,6 +454,41 @@ milliseconds, keyword 9 to 14, hybrid 26 to 30.
 So the worker's tool stays on dense search until a fixed set of questions
 shows that hybrid is better. A reranker is not built.
 
+## The golden set
+
+A fixed list of 20 questions with their expected outcome, in
+`evals/golden_set.json` (ADR-0018). Ten come from the capstone prototype; ten
+were added for the second worker and for retrieval. The expected values were
+written from the policy files and the seed data, not from what the system
+returns.
+
+Retrieval: the 9 policy questions through dense, keyword and hybrid search.
+No model call:
+
+```bash
+uv run python scripts/run_golden_set.py
+```
+
+Routing: the supervisor's plan for all 20 questions, compared with the
+expected workers. One model call for each question:
+
+```bash
+uv run python scripts/run_golden_set.py routing
+```
+
+One run of each on 10 Oct 2026:
+
+| | Dense | Keyword | Hybrid |
+|---|---|---|---|
+| Right passage first | 8 of 9 | 6 of 9 | 7 of 9 |
+| Right passage in the first three | 9 of 9 | 8 of 9 | 9 of 9 |
+
+Routing accuracy: 17 of 20, for 20 model calls and $0.0036. The three misses
+are listed in ADR-0018. All three are on the safe side: a refusal or a
+read-only worker, never a change.
+
+The text of an answer is not scored yet.
+
 ## Stack
 
 In use: Python 3.12 · LangGraph · LangChain (`create_agent`) · Pydantic ·
@@ -474,6 +517,8 @@ Planned: Redis · FastAPI
       embedder.py           # text to vectors; the only module that knows the model
       policy_ingest.py      # replaces the policy_passages table from the files
       policy_search.py      # dense, keyword and hybrid search; the search_policy tool
+      golden_set.py         # loads the golden set
+      eval_metrics.py       # scores one case: hit, rate, same workers
       rank_fusion.py        # merges two ranked lists by position
       analysis_tools.py     # 3 tools on the pricing tables
       db.py                 # read-only data access; a process picks its database user
@@ -486,10 +531,12 @@ Planned: Redis · FastAPI
       llm_prices.py         # price table and the cost of a call
       config.py             # step limits; allowed tool sources
     data/policies/          # the FAQ and policy texts the policy search reads
+    evals/golden_set.json   # 20 fixed questions with their expected outcome
     sql/                    # tables, sample data, the MCP role, the call log and the passages, in order
     scripts/init_db.py      # creates the checkpoint tables
     scripts/ingest_policies.py    # loads the policy texts into Postgres
     scripts/try_policy_search.py  # prints what dense, keyword and hybrid find
+    scripts/run_golden_set.py     # scores retrieval and routing on the golden set
     scripts/ask.py          # asks the platform one question, with the call log attached
     scripts/try_mcp_*.py    # small MCP clients: stdio, HTTP and the host library
     tests/                  # no test calls a real LLM
@@ -519,9 +566,10 @@ Planned: Redis · FastAPI
 | 0015 | Full-content traces for seed data only; tracing is off by default and switched on per command (amended 9 Oct: the per-call log now exists) |
 | 0016 | Every model call is logged with its cost and its prompt versions; prompts are versioned files |
 | 0017 | Policy questions are answered from passages found by dense search in Postgres (pgvector), as a fifth tool of the support worker (amended 10 Oct: keyword and hybrid search are built; the tool stays on dense until measured) |
+| 0018 | A golden set of 20 cases scores routing and retrieval in plain code; answer text is not scored yet |
 
 ## Incident log
 
 [`INCIDENTS.md`](INCIDENTS.md) records every real bug found while building:
-what happened, why, what changed, and the numbers before and after. Twelve so
-far, all from Module 3.
+what happened, why, what changed, and the numbers before and after. Thirteen
+so far: twelve from Module 3 and one from the evaluation piece.

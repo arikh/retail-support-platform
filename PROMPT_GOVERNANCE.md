@@ -63,7 +63,7 @@ together with a new tool, so the run does not say what each prompt added on its 
 | **Ownership** | Every prompt has a named owner (the table above). The owner approves every change to it. | Convention. This is a one-person repository; there is no `CODEOWNERS` file. |
 | **Standards** | A prompt holds instructions only: no secrets, no credentials, no personal data. A worker prompt says what the worker is for, that it must use its tools and never answer from memory, that it is read-only, and what to say when the data is missing. Plain text, no markdown. | Convention, checked by reading the pull request. No automated check. |
 | **Change control** | A prompt changes only by pull request. A change is a **new version file**; a version file that has been merged is never edited. | Code, in part: a test fails if an earlier version file is deleted. Nothing detects an edit to a merged file. |
-| **Evaluation gate** | The pull request shows what the change did: the same questions run on the old and the new version, with quality, cost and latency side by side. No run, no merge. | Not yet. The evaluation harness is not built. Until it is, the pull request shows one real run before and one after, with the rows from `llm_calls`. |
+| **Evaluation gate** | The pull request shows what the change did: the same questions run on the old and the new version, with quality, cost and latency side by side. No run, no merge. | In part. `scripts/run_golden_set.py routing` gives the routing accuracy on 20 fixed questions and its cost, before and after a prompt change (ADR-0018). The first result, for the version 2 routing prompt, is 17 of 20. Answer quality is not scored, and nothing refuses a merge. |
 | **Rollout and rollback** | Old version files are kept. A rollback sets the prompt's entry in `ACTIVE_VERSIONS` back to the old version, by pull request. A new version goes live for every call at once. | Code, in part: a test loads every live version, and a second test checks that every version file from v1 up to the live one exists. So a missing file fails the suite. No rollback has been done yet, and there is no gradual rollout. |
 | **Audit** | Every model call is recorded in the table `llm_calls` with the name and version of each prompt it used. | Code, when the logger is attached: a database check refuses a row with no prompt, and tests check that each call site names its prompts. No entry point attaches the logger yet. |
 | **Security** | Tool output is data, never instructions. | Code, in part. See "Security" below. |
@@ -150,10 +150,11 @@ do not own.
 
 ## Not in place yet
 
-- The evaluation harness, so the evaluation gate is a manual run.
+- A score for the text of an answer, and a run of the golden set on every pull request.
+  The evaluation gate is a command a person runs.
 - A check that a merged version file has not been edited.
-- A comparison of two versions on a fixed set of questions. The version 2 prompts were
-  shown by one question before and after. No rollback has been done.
+- A comparison of two versions on the golden set. The set exists; only the version 2
+  routing prompt has been run on it. No rollback has been done.
 - A version for the tool descriptions. A tool's description is its docstring; it is
   prompt text, and it sits outside the prompt store.
 - A gradual rollout of a new version.
