@@ -1,17 +1,26 @@
-"""Dense search over the policy passages.
+"""Three searches over the policy passages: dense, keyword and hybrid.
 
-The question is turned into a vector, and Postgres returns the passages whose
-vectors are nearest to it. "<=>" is pgvector's cosine distance: 0 means the
-same direction, larger means further apart. Only the order is meaningful;
-there is no distance below which a passage is "relevant".
+Dense: the question is turned into a vector, and Postgres returns the passages
+whose vectors are nearest to it. "<=>" is pgvector's cosine distance: 0 means
+the same direction, larger means further apart.
+
+Keyword: Postgres returns the passages that contain at least one word of the
+question, ranked by how well the words match (sql/008).
+
+Hybrid: both searches run, and their two lists are merged by position
+(rank_fusion.py).
+
+In all three only the order is meaningful; no number means "relevant".
 """
 
 import asyncio
 
 from retail_support.db import fetch_all
 from retail_support.embedder import EMBEDDING_MODEL, embed_query, vector_literal
+from retail_support.rank_fusion import fuse
 
 DEFAULT_LIMIT = 3
+CANDIDATES = 10
 NOTHING_LOADED = "No policy passages are loaded."
 
 NEAREST_PASSAGES = """
@@ -19,6 +28,16 @@ NEAREST_PASSAGES = """
     FROM policy_passages
     WHERE embedding_model = %s
     ORDER BY distance
+    LIMIT %s
+"""
+
+KEYWORD_PASSAGES = """
+    SELECT source, heading, content, ts_rank(content_tsv, query) AS score
+    FROM policy_passages,
+         (SELECT replace(plainto_tsquery('english', %s)::text, '&', '|')::tsquery
+                 AS query) AS q
+    WHERE content_tsv @@ query
+    ORDER BY score DESC, source, heading
     LIMIT %s
 """
 
@@ -32,6 +51,22 @@ async def search_passages(question: str, limit: int = DEFAULT_LIMIT) -> list[dic
     return await fetch_all(
         NEAREST_PASSAGES, (vector_literal(vector), EMBEDDING_MODEL, limit)
     )
+
+async def keyword_passages(question: str, limit: int = DEFAULT_LIMIT) -> list[dict]:
+    """The `limit` passages that best match the question's words, best first.
+
+    Each row has source, heading, content and score. Empty when no word matches."""
+    return await fetch_all(
+        KEYWORD_PASSAGES, (question, limit)
+    )  
+
+async def hybrid_passages(question: str, limit: int = DEFAULT_LIMIT) -> list[dict]:
+    """The `limit` passages with the most fused points, most points first.
+
+    Each row has source, heading, content and score."""
+    dense = await search_passages(question, CANDIDATES)
+    keyword = await keyword_passages(question, CANDIDATES)
+    return fuse(dense, keyword, limit)
 
 
 async def search_policy(question: str) -> str:

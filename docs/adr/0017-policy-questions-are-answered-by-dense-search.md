@@ -1,7 +1,7 @@
 # ADR-0017: Policy Questions Are Answered From Passages Found by Dense Search in Postgres
 
 ## Status
-Accepted
+Accepted. Amended 10 Oct 2026 (see the end).
 
 ## Context
 
@@ -209,3 +209,98 @@ This ADR is revisited when any of these happens:
 - scripts/ingest_policies.py, scripts/try_policy_search.py, scripts/ask.py
 - pgvector 0.8.7 (Docker image pgvector/pgvector:pg16-trixie); fastembed 0.9.0
 - Build plan — Piece 2 (policy search)
+
+## Amendment — 10 Oct 2026: keyword search and fusion are built
+
+The decision above stands: the support worker's tool, search_policy, still answers from
+dense search. What changed is that the first trigger has fired. Keyword search and the
+fusion of the two result lists now exist as functions, with tests, and were run side by
+side with dense search.
+
+Keyword search. sql/008_policy_keyword_search.sql adds a column, content_tsv, to
+policy_passages. Postgres fills it itself from content on every insert (a generated
+column): the words in lower case, cut to their stem, with common words dropped. The
+ingest did not change. keyword_passages in policy_search.py prepares the question the
+same way and returns the passages that contain at least one of its words, best first,
+ordered by Postgres's ts_rank. Rows with the same score are ordered by source and
+heading, so a result is the same on every run. It returns an empty list when no word
+matches.
+
+The words of the question are joined with OR, not AND. Postgres's plainto_tsquery joins
+them with AND, and a passage must then contain every word. Checked on a Postgres 16 with
+the same 16 passages: with AND, two of the four test questions matched no passage. The
+query therefore replaces each AND with OR before it is used.
+
+Fusion. fuse in rank_fusion.py merges two ranked lists by reciprocal rank fusion. Each
+list gives a passage 1 / (60 + position) points, with position 1 for the first row, and
+the points of the two lists are added. Only the position counts. A cosine distance and a
+word score are different units and cannot be added; "first" and "third" mean the same in
+both lists. The 60 is the usual constant and was not tuned.
+
+Hybrid search. hybrid_passages takes 10 passages from the dense search and 10 from the
+keyword search, one search after the other, and returns the 3 with the most points.
+
+Why the tool was not switched. One run on 10 Oct 2026, the four questions of
+scripts/try_policy_search.py, three passages each:
+
+- Dense, keyword and hybrid put the same passage first on all four questions.
+- On two questions dense and keyword agreed on all three places, and hybrid returned the
+  same order.
+- "Who fixes a wrong market mapping?" Dense had MARKET_MAPPING_RULE third, behind two
+  passages 0.002 apart; keyword had it first. In hybrid the three passages had almost the
+  same points (0.0323), and two had exactly the same, so their order was decided by file
+  name.
+- "What is CATEGORY_CHANNEL_RULE?" The first two places were unchanged. The third place
+  went to a passage that was in neither list's first three: it was lower in both lists,
+  and that outweighed a passage only one search had ranked high.
+- Time for one search after the first: dense 15 to 48 milliseconds, keyword 9 to 14,
+  hybrid 26 to 30. The first dense search took 216 milliseconds (the model load).
+
+So on these four questions hybrid shows no gain and no loss. Four questions cannot say
+which search gives better answers. The tool changes only when a fixed set of questions
+with expected passages shows that hybrid is not worse.
+
+What keyword search did show: it ranks a rule first when the question names it, and it
+returns nothing for a question off the topic ("What is the capital of France?"), where
+dense search returned three passages at distances of 0.576 to 0.618. On the four
+questions the right first passage was at 0.259 or nearer. No cut-off is set from five
+questions.
+
+Covered by tests (148 in the suite, 22 of them new): keyword search (7, on the local
+Postgres), fusion (10, no database and no model) and hybrid search (5).
+
+Two sentences above are now out of date: "Keyword search, fusion and a reranker. Not
+rejected, not built" and, under "Not built", "Keyword search, fusion and a reranker". The
+reranker is still not built.
+
+Not built:
+
+- search_policy on hybrid search.
+- A reranker, and a cut-off that drops weak passages.
+- The golden dataset and a hit rate for each of the three searches.
+- Fusion of the scores themselves with a weight, as the alternative to fusion by
+  position.
+- The two searches run at the same time. They run one after the other.
+
+Known gaps:
+
+- With OR, a passage matches when it shares one word with the question. A long question
+  matches most of the table, and only the ranking separates the passages.
+- A name such as CATEGORY_CHANNEL_RULE is stored as three ordinary words (category,
+  channel, rule), and a material ID such as M-1001 is split into parts. So an exact name
+  or ID is not matched as one unit.
+- The words are prepared with Postgres's English rules only.
+- The replacement of AND by OR is done on the text of the query. A word that itself
+  contains "&", such as a web address, is changed too. Checked: no error, no match.
+- Equal points in the fusion are ordered by file name, which says nothing about quality.
+- The 60 and the 10 candidates were chosen, not measured.
+- The index on content_tsv is not needed for 16 rows. Whether Postgres uses it was not
+  checked.
+
+References for this amendment:
+- sql/008_policy_keyword_search.sql
+- policy_search.py (keyword_passages, hybrid_passages), rank_fusion.py
+- tests/test_keyword_search.py, tests/test_rank_fusion.py, tests/test_hybrid_search.py
+- scripts/try_policy_search.py (the run of 10 Oct 2026)
+- PostgreSQL documentation — Full Text Search (to_tsvector, plainto_tsquery, ts_rank)
+- Cormack, Clarke and Büttcher (2009) — Reciprocal Rank Fusion

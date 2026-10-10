@@ -59,6 +59,7 @@ so it is not counted as built.
 | Policy corpus | Three FAQ and policy files cut into 16 passages, one for each `## ` section (ADR-0017) | `tests/test_policy_corpus.py` |
 | Embedder | Text to vectors with an open-source model that runs on this machine (`BAAI/bge-small-en-v1.5`, 384 numbers) | `tests/test_embedder.py` |
 | Policy search | The passages and their vectors in Postgres (pgvector); the table is replaced as a whole from the files; a question returns its 3 nearest passages, each with its source (ADR-0017) | `tests/test_policy_search.py` |
+| Keyword and hybrid search | The same passages searched by their words (Postgres full-text search), and the two result lists merged by position (reciprocal rank fusion). Built as functions; the worker's tool still uses dense search (ADR-0017 amendment) | `tests/test_keyword_search.py`, `tests/test_rank_fusion.py`, `tests/test_hybrid_search.py` |
 
 No test calls a real LLM. The graph, supervisor and worker tests use fakes.
 The tool, data-access, checkpointer, MCP, per-call-log and policy-search
@@ -81,7 +82,7 @@ not as automated tests.
 | PII tokenization and erasure (the vault table exists; no code uses it) | ADR-0006 |
 | Redis locks and cache | ADR-0005, ADR-0010 |
 | Rules-first worker choice and the fallback log | ADR-0004 (see its amendment) |
-| Keyword search, fusion and a reranker for the policy search; a fixed set of questions (golden dataset) to measure each stage | ADR-0017 (see "Not built") |
+| The worker's policy tool on hybrid search; a reranker; a fixed set of questions (golden dataset) to measure each stage | ADR-0017 (see its amendment) |
 | Tracing on every request with the content rule enforced in code; the per-call log attached to every request; token budgets; evaluation | Module 7; ADR-0015 for the content rule; ADR-0016 for the log |
 | A comparison of two prompt versions on a fixed set of questions; a rollback | `PROMPT_GOVERNANCE.md` |
 | API layer, auth, deployment | Module 8 |
@@ -126,8 +127,10 @@ not as automated tests.
   before and after, not by a set of questions, and no rollback has been
   done. The rules in `PROMPT_GOVERNANCE.md` are mostly conventions; nothing
   stops an edit to a merged prompt file.
-- The policy search is dense search only, over 16 passages. Its quality
-  stands on four questions typed by hand: no golden dataset, no hit rate.
+- The worker's policy tool uses dense search only, over 16 passages.
+  Keyword and hybrid search exist and are tested, but on four questions
+  typed by hand hybrid put the same passage first as dense every time. No
+  golden dataset and no hit rate exist to say which is better.
 - The policy search always returns three passages, also for a question the
   texts do not cover. Whether they answer the question is left to the model.
 - An answer from the policy texts names its source because the prompt asks
@@ -396,6 +399,16 @@ files in `data/policies/`, not from the model's memory (ADR-0017).
 5. The support worker calls this as its fifth tool, `search_policy`, answers
    only from the passages it gets, and names the one it used.
 
+Two more searches are built on the same table and are not yet used by the
+worker (ADR-0017 amendment):
+
+- `keyword_passages` finds the passages that contain the words of the
+  question, with Postgres full-text search (`sql/008`). It returns nothing
+  when no word matches.
+- `hybrid_passages` takes 10 passages from the dense search and 10 from the
+  keyword search and merges the two lists with `fuse` in `rank_fusion.py`.
+  Only the position in each list counts (reciprocal rank fusion).
+
 Run the ingest again after any change to the files:
 
 ```bash
@@ -409,8 +422,10 @@ uv run python scripts/try_policy_search.py
 uv run python scripts/try_policy_search.py "Who fixes a wrong market mapping?"
 ```
 
-It prints the three nearest passages with their distance. A smaller distance
-means nearer. Only the order is used: no distance means "relevant".
+It prints three lists for each question: dense, keyword and hybrid. For
+dense the number is a distance, and smaller means nearer. For keyword and
+hybrid it is a score, and larger is better. Only the order is used: no
+number means "relevant".
 
 Runs on 9 Oct 2026 (one or two each): 16 passages loaded in 0.55 seconds;
 the first search took 236 milliseconds, most of it loading the model, and
@@ -423,8 +438,13 @@ with the search and the version 2 prompts, a correct answer that names its
 source in 4 model calls ($0.000655). The planning call's input grew from 567
 to 668 tokens, and every question pays that.
 
-This is dense search only. Keyword search, fusion and a reranker are not
-built, and the search is not yet measured on a fixed set of questions.
+One run of the three searches on 10 Oct 2026, on the script's four
+questions: all three put the same passage first every time. Hybrid changed
+only the second and third place, on two questions. Dense took 15 to 48
+milliseconds, keyword 9 to 14, hybrid 26 to 30.
+
+So the worker's tool stays on dense search until a fixed set of questions
+shows that hybrid is better. A reranker is not built.
 
 ## Stack
 
@@ -453,7 +473,8 @@ Planned: Redis · FastAPI
       policy_corpus.py      # cuts the policy files into passages
       embedder.py           # text to vectors; the only module that knows the model
       policy_ingest.py      # replaces the policy_passages table from the files
-      policy_search.py      # dense search; the search_policy tool
+      policy_search.py      # dense, keyword and hybrid search; the search_policy tool
+      rank_fusion.py        # merges two ranked lists by position
       analysis_tools.py     # 3 tools on the pricing tables
       db.py                 # read-only data access; a process picks its database user
       checkpointer.py       # Postgres checkpointer
@@ -468,7 +489,7 @@ Planned: Redis · FastAPI
     sql/                    # tables, sample data, the MCP role, the call log and the passages, in order
     scripts/init_db.py      # creates the checkpoint tables
     scripts/ingest_policies.py    # loads the policy texts into Postgres
-    scripts/try_policy_search.py  # prints what the search finds for a question
+    scripts/try_policy_search.py  # prints what dense, keyword and hybrid find
     scripts/ask.py          # asks the platform one question, with the call log attached
     scripts/try_mcp_*.py    # small MCP clients: stdio, HTTP and the host library
     tests/                  # no test calls a real LLM
@@ -497,7 +518,7 @@ Planned: Redis · FastAPI
 | 0014 | The agent keeps in-process tools; an MCP server offers the same lookups to outside hosts (amended 8 Oct: the agent can also be an MCP host, off by default) |
 | 0015 | Full-content traces for seed data only; tracing is off by default and switched on per command (amended 9 Oct: the per-call log now exists) |
 | 0016 | Every model call is logged with its cost and its prompt versions; prompts are versioned files |
-| 0017 | Policy questions are answered from passages found by dense search in Postgres (pgvector), as a fifth tool of the support worker |
+| 0017 | Policy questions are answered from passages found by dense search in Postgres (pgvector), as a fifth tool of the support worker (amended 10 Oct: keyword and hybrid search are built; the tool stays on dense until measured) |
 
 ## Incident log
 
