@@ -16,6 +16,8 @@ routing    For each case, the supervisor's plan compared with the expected
 import asyncio
 import sys
 import uuid
+import json
+from pathlib import Path
 
 from retail_support.eval_metrics import is_hit, rate, same_workers
 from retail_support.golden_set import load_cases, policy_cases
@@ -71,7 +73,7 @@ async def run_retrieval(cases: list[dict]) -> None:
         print(f"  hit rate at {k}:  " + "   ".join(scores))
 
 
-async def run_routing(cases: list[dict]) -> None:
+async def run_routing(cases: list[dict], trials: int = 1) -> None:
     # Imported here so that a retrieval run needs no LLM key.
     from langchain_core.messages import HumanMessage
     from langchain_core.runnables import RunnableLambda
@@ -85,44 +87,53 @@ async def run_routing(cases: list[dict]) -> None:
     results: list[bool] = []
     failed_calls = 0
 
-    print(f"\nRouting: {len(cases)} cases, one LLM call each (run {run})\n")
-    for case in cases:
-        # The state a question has when it reaches the supervisor.
-        state = {
-            "messages": [HumanMessage(case["question"])],
-            "plan": None,
-            "next": [],
-            "status": "running",
-            "step_count": 0,
-            "errors": [],
-            "pending_approval": None,
-            "support_findings": None,
-            "analysis_findings": None,
-            "escalation_findings": None,
-        }
-        thread_id = f"golden-{run}-{case['id']}"
-        config = {
-            "callbacks": [logger],
-            "metadata": {"thread_id": thread_id},
-            "configurable": {"thread_id": thread_id},
-        }
-        result = await planner.ainvoke(state, config=config)
+    out_path = Path("eval_runs") / f"pass_k_{run}.jsonl"
+    out_path.parent.mkdir(exist_ok=True)
 
-        expected = sorted(case["expected_workers"])
-        if "plan" not in result:  # the model call itself failed
-            failed_calls += 1
-            results.append(False)
-            print(f"  {case['id']}  ERROR {result['errors'][0]}")
-            continue
-
-        planned = sorted(result["plan"])
-        correct = same_workers(planned, expected)
-        results.append(correct)
-        mark = "ok  " if correct else "MISS"
-        print(
-            f"  {case['id']}  {mark}  planned {str(planned):<24} "
-            f"expected {str(expected):<24} {case['question']}"
-        )
+    with out_path.open("w") as out:
+        print(f"\nRouting: {len(cases)} cases, one LLM call each (run {run})\n")
+        for case in cases:
+            for trial in range(1, trials + 1):
+                # The state a question has when it reaches the supervisor.
+                state = {
+                    "messages": [HumanMessage(case["question"])],
+                    "plan": None,
+                    "next": [],
+                    "status": "running",
+                    "step_count": 0,
+                    "errors": [],
+                    "pending_approval": None,
+                    "support_findings": None,
+                    "analysis_findings": None,
+                    "escalation_findings": None,
+                }
+                thread_id = f"golden-{run}-{case['id']}-t{trial}"
+                config = {
+                    "callbacks": [logger],
+                    "metadata": {"thread_id": thread_id},
+                    "configurable": {"thread_id": thread_id},
+                }
+                result = await planner.ainvoke(state, config=config)
+        
+                expected = sorted(case["expected_workers"])
+                if "plan" not in result:  # the model call itself failed
+                    failed_calls += 1
+                    results.append(False)
+                    print(f"  {case['id']}  ERROR {result['errors'][0]}")
+                    row = {"case_id": case["id"], "trial": trial, "expected_workers": expected, "planned_workers": [], "passed": False, "error": True}
+                    out.write(json.dumps(row) + "\n")
+                    continue
+        
+                planned = sorted(result["plan"])
+                correct = same_workers(planned, expected)
+                results.append(correct)
+                row = {"case_id": case["id"], "trial": trial, "expected_workers": expected, "planned_workers": planned, "passed": correct}
+                out.write(json.dumps(row) + "\n")
+                mark = "ok  " if correct else "MISS"
+                print(
+                    f"  {case['id']} t{trial}  {mark}  planned {str(planned):<24} "
+                    f"expected {str(expected):<24} {case['question']}"
+                )
 
     print(
         f"\n  routing accuracy: {rate(results):.2f} "
@@ -137,18 +148,20 @@ async def run_routing(cases: list[dict]) -> None:
         f"sum(cost_usd) AS cost_usd FROM llm_calls "
         f"WHERE thread_id LIKE 'golden-{run}-%'\""
     )
+    print(f"\n  trials saved to: {out_path}")
 
 
 async def main() -> None:
     what = sys.argv[1] if len(sys.argv) > 1 else "retrieval"
     if what not in ("retrieval", "routing", "all"):
         sys.exit("usage: run_golden_set.py [retrieval | routing | all]")
-
+    
+    trials = int(sys.argv[2]) if len(sys.argv) > 2 else 1
     cases = load_cases()
     if what in ("retrieval", "all"):
         await run_retrieval(cases)
     if what in ("routing", "all"):
-        await run_routing(cases)
+        await run_routing(cases, trials)
 
 
 if __name__ == "__main__":
